@@ -1,9 +1,52 @@
 // import { Schema, model } from "mongoose";
 // import {
 //     IProject,
+//     IPayment,
+//     IProjectDocument,
 //     ProjectStatus,
 //     ProjectType,
+//     PaymentStatus,
 // } from "./project.interface";
+
+// const paymentSchema = new Schema<IPayment>(
+//     {
+//         amount: {
+//             type: Number,
+//             required: [true, "Payment amount is required"],
+//             min: [0, "Payment amount cannot be negative"],
+//         },
+//         date: {
+//             type: Date,
+//             required: [true, "Payment date is required"],
+//         },
+//         status: {
+//             type: String,
+//             enum: Object.values(PaymentStatus),
+//             required: [true, "Payment status is required"],
+//         },
+//         note: {
+//             type: String,
+//             trim: true,
+//         },
+//     },
+//     { _id: true, timestamps: false },
+// );
+
+// const projectDocumentSchema = new Schema<IProjectDocument>(
+//     {
+//         requirement: {
+//             type: String,
+//             required: [true, "Requirement name is required"],
+//             trim: true,
+//         },
+//         link: {
+//             type: String,
+//             required: [true, "Link is required"],
+//             trim: true,
+//         },
+//     },
+//     { _id: true, timestamps: false },
+// );
 
 // const projectSchema = new Schema<IProject>(
 //     {
@@ -62,15 +105,37 @@
 //             required: [true, "Technologies are required"],
 //         },
 
-//         requirements: {
-//             type: String,
-//             trim: true,
+//         documents: {
+//             type: [projectDocumentSchema],
+//             default: [],
 //         },
 
 //         status: {
 //             type: String,
 //             enum: Object.values(ProjectStatus),
 //             default: ProjectStatus.PLANNING,
+//         },
+
+//         paymentStatus: {
+//             type: String,
+//             enum: Object.values(PaymentStatus),
+//             default: PaymentStatus.DUE,
+//         },
+
+//         payments: {
+//             type: [paymentSchema],
+//             default: [],
+//         },
+
+//         nextPaymentDate: {
+//             type: Date,
+//         },
+
+//         priority: {
+//             type: Number,
+//             min: [1, "Priority must be at least 1"],
+//             unique: true,
+//             sparse: true,
 //         },
 
 //         liveUrl: {
@@ -115,14 +180,14 @@
 
 // export const Project = model<IProject>("Project", projectSchema);
 
-
-// v2
+// v3
 
 import { Schema, model } from "mongoose";
 import {
     IProject,
     IPayment,
     IProjectDocument,
+    IPaymentInstallment,
     ProjectStatus,
     ProjectType,
     PaymentStatus,
@@ -163,6 +228,36 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
             type: String,
             required: [true, "Link is required"],
             trim: true,
+        },
+    },
+    { _id: true, timestamps: false },
+);
+
+const paymentInstallmentSchema = new Schema<IPaymentInstallment>(
+    {
+        installmentNo: {
+            type: String,
+            required: [true, "Installment name is required"],
+            trim: true,
+        },
+        projectionDate: {
+            type: Date,
+            required: [true, "Projection date is required"],
+        },
+        paymentPercentage: {
+            type: Number,
+            required: [true, "Payment percentage is required"],
+            min: [0, "Payment percentage cannot be negative"],
+            max: [100, "Payment percentage cannot exceed 100"],
+        },
+        amount: {
+            type: Number,
+            required: [true, "Amount is required"],
+            min: [0, "Amount cannot be negative"],
+        },
+        isCompleted: {
+            type: Boolean,
+            default: false,
         },
     },
     { _id: true, timestamps: false },
@@ -244,6 +339,11 @@ const projectSchema = new Schema<IProject>(
 
         payments: {
             type: [paymentSchema],
+            default: [],
+        },
+
+        paymentSchedule: {
+            type: [paymentInstallmentSchema],
             default: [],
         },
 

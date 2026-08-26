@@ -1,8 +1,40 @@
+
 // import { z } from "zod";
-// import { ProjectStatus, ProjectType } from "./project.interface";
+// import { ProjectStatus, ProjectType, PaymentStatus } from "./project.interface";
 
 // const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 // const projectStatusValues = Object.values(ProjectStatus) as [ProjectStatus, ...ProjectStatus[]];
+// const paymentStatusValues = Object.values(PaymentStatus) as [PaymentStatus, ...PaymentStatus[]];
+
+// const paymentValidationSchema = z.object({
+//   amount: z
+//     .number()
+//     .min(0, "Payment amount cannot be negative"),
+
+//   date: z
+//     .string()
+//     .min(1, "Payment date is required"),
+
+//   status: z.enum(paymentStatusValues, {
+//     errorMap: () => ({ message: "Invalid payment status" }),
+//   }),
+
+//   note: z
+//     .string()
+//     .trim()
+//     .optional(),
+// });
+
+// const projectDocumentValidationSchema = z.object({
+//   requirement: z
+//     .string()
+//     .min(1, "Requirement is required")
+//     .trim(),
+
+//   link: z
+//     .string()
+//     .url("Invalid link URL"),
+// });
 
 // export const createProjectValidationSchema = z.object({
 //     name: z
@@ -49,9 +81,10 @@
 //       .array(z.string())
 //       .min(1, "At least one technology is required"),
 
-//     requirements: z
-//       .string()
-//       .optional(),
+//     documents: z
+//       .array(projectDocumentValidationSchema)
+//       .optional()
+//       .default([]),
 
 //     status: z
 //       .enum(projectStatusValues, {
@@ -59,6 +92,28 @@
 //       })
 //       .optional()
 //       .default(ProjectStatus.PLANNING),
+
+//     paymentStatus: z
+//       .enum(paymentStatusValues, {
+//         errorMap: () => ({ message: "Invalid payment status" }),
+//       })
+//       .optional()
+//       .default(PaymentStatus.DUE),
+
+//     payments: z
+//       .array(paymentValidationSchema)
+//       .optional()
+//       .default([]),
+
+//     nextPaymentDate: z
+//       .string()
+//       .optional(),
+
+//     priority: z
+//       .number()
+//       .int()
+//       .min(1, "Priority must be at least 1")
+//       .optional(),
 
 //     liveUrl: z
 //       .string()
@@ -77,8 +132,6 @@
 //   });
 
 //   export const updateProjectValidationSchema = createProjectValidationSchema.partial();
-
-// v2
 
 import { z } from "zod";
 import { ProjectStatus, ProjectType, PaymentStatus } from "./project.interface";
@@ -117,99 +170,129 @@ const projectDocumentValidationSchema = z.object({
     .url("Invalid link URL"),
 });
 
+const paymentInstallmentValidationSchema = z.object({
+  installmentNo: z
+    .string()
+    .min(1, "Installment name is required")
+    .trim(),
+
+  projectionDate: z
+    .string()
+    .min(1, "Projection date is required"),
+
+  paymentPercentage: z
+    .number()
+    .min(0, "Payment percentage cannot be negative")
+    .max(100, "Payment percentage cannot exceed 100"),
+
+  amount: z
+    .number()
+    .min(0, "Amount cannot be negative"),
+
+  isCompleted: z
+    .boolean()
+    .optional()
+    .default(false),
+});
+
 export const createProjectValidationSchema = z.object({
-    name: z
-      .string()
-      .min(1, "Project name is required")
-      .trim(),
+  name: z
+    .string()
+    .min(1, "Project name is required")
+    .trim(),
 
-    description: z
-      .string()
-      .trim()
-      .optional(),
+  description: z
+    .string()
+    .trim()
+    .optional(),
 
-    type: z.enum(projectTypeValues, {
-      errorMap: () => ({ message: "Invalid project type" }),
-    }   ),
+  type: z.enum(projectTypeValues, {
+    errorMap: () => ({ message: "Invalid project type" }),
+  }),
 
-    client: z
-      .string()
-      .min(1, "Project client is required"),
+  client: z
+    .string()
+    .min(1, "Project client is required"),
 
-    projectManager: z
-      .string()
-      .min(1, "Project manager is required"),
+  projectManager: z
+    .string()
+    .min(1, "Project manager is required"),
 
-    developers: z
-      .array(z.string())
-      .optional()
-      .default([]),
+  developers: z
+    .array(z.string())
+    .optional()
+    .default([]),
 
-    budget: z
-      .number()
-      .min(0, "Budget cannot be negative")
-      .optional(),
+  budget: z
+    .number()
+    .min(0, "Budget cannot be negative")
+    .optional(),
 
-    startDate: z
-      .string()
-      .min(1, "Start date is required"),
+  startDate: z
+    .string()
+    .min(1, "Start date is required"),
 
-    endDate: z
-      .string()
-      .optional(),
+  endDate: z
+    .string()
+    .optional(),
 
-    technologies: z
-      .array(z.string())
-      .min(1, "At least one technology is required"),
+  technologies: z
+    .array(z.string())
+    .min(1, "At least one technology is required"),
 
-    documents: z
-      .array(projectDocumentValidationSchema)
-      .optional()
-      .default([]),
+  documents: z
+    .array(projectDocumentValidationSchema)
+    .optional()
+    .default([]),
 
-    status: z
-      .enum(projectStatusValues, {
-        errorMap: () => ({ message: "Invalid project status" }),
-      })
-      .optional()
-      .default(ProjectStatus.PLANNING),
+  status: z
+    .enum(projectStatusValues, {
+      errorMap: () => ({ message: "Invalid project status" }),
+    })
+    .optional()
+    .default(ProjectStatus.PLANNING),
 
-    paymentStatus: z
-      .enum(paymentStatusValues, {
-        errorMap: () => ({ message: "Invalid payment status" }),
-      })
-      .optional()
-      .default(PaymentStatus.DUE),
+  paymentStatus: z
+    .enum(paymentStatusValues, {
+      errorMap: () => ({ message: "Invalid payment status" }),
+    })
+    .optional()
+    .default(PaymentStatus.DUE),
 
-    payments: z
-      .array(paymentValidationSchema)
-      .optional()
-      .default([]),
+  payments: z
+    .array(paymentValidationSchema)
+    .optional()
+    .default([]),
 
-    nextPaymentDate: z
-      .string()
-      .optional(),
+  paymentSchedule: z
+    .array(paymentInstallmentValidationSchema)
+    .optional()
+    .default([]),
 
-    priority: z
-      .number()
-      .int()
-      .min(1, "Priority must be at least 1")
-      .optional(),
+  nextPaymentDate: z
+    .string()
+    .optional(),
 
-    liveUrl: z
-      .string()
-      .url("Invalid live URL")
-      .optional(),
+  priority: z
+    .number()
+    .int()
+    .min(1, "Priority must be at least 1")
+    .optional(),
 
-    developmentLiveUrl: z
-      .string()
-      .url("Invalid development URL")
-      .optional(),
+  liveUrl: z
+    .string()
+    .url("Invalid live URL")
+    .optional(),
 
-    repositoryUrl: z
-      .string()
-      .url("Invalid repository URL")
-      .optional(),
-  });
+  developmentLiveUrl: z
+    .string()
+    .url("Invalid development URL")
+    .optional(),
 
-  export const updateProjectValidationSchema = createProjectValidationSchema.partial();
+  repositoryUrl: z
+    .string()
+    .url("Invalid repository URL")
+    .optional(),
+});
+
+export const updateProjectValidationSchema = createProjectValidationSchema.partial();

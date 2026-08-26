@@ -1,3 +1,4 @@
+
 // import { Types } from "mongoose";
 
 // export enum ProjectStatus {
@@ -21,6 +22,27 @@
 //     OTHER = "OTHER",
 // }
 
+// export enum PaymentStatus {
+//     DUE = "DUE",
+//     PARTIAL = "PARTIAL",
+//     ADVANCED = "ADVANCED",
+//     COMPLETE = "COMPLETE",
+// }
+
+// export interface IPayment {
+//     _id?: Types.ObjectId;
+//     amount: number;
+//     date: Date;
+//     status: PaymentStatus;
+//     note?: string;
+// }
+
+// export interface IProjectDocument {
+//     _id?: Types.ObjectId;
+//     requirement: string;
+//     link: string;
+// }
+
 // export interface IProject {
 //     _id?: Types.ObjectId;
 
@@ -40,9 +62,15 @@
 
 //     technologies: string[];
 
-//     requirements?: string;
+//     documents?: IProjectDocument[];
 
 //     status: ProjectStatus;
+
+//     paymentStatus?: PaymentStatus;
+//     payments?: IPayment[];
+//     nextPaymentDate?: Date;
+
+//     priority?: number;
 
 //     liveUrl?: string;
 //     developmentLiveUrl?: string;
@@ -57,8 +85,8 @@
 //     updatedAt?: Date;
 // }
 
+// v3
 
-// v2
 import { Types } from "mongoose";
 
 export enum ProjectStatus {
@@ -103,6 +131,15 @@ export interface IProjectDocument {
     link: string;
 }
 
+export interface IPaymentInstallment {
+    _id?: Types.ObjectId;
+    installmentNo: string;
+    projectionDate: Date;
+    paymentPercentage: number;
+    amount: number;
+    isCompleted: boolean;
+}
+
 export interface IProject {
     _id?: Types.ObjectId;
 
@@ -128,6 +165,7 @@ export interface IProject {
 
     paymentStatus?: PaymentStatus;
     payments?: IPayment[];
+    paymentSchedule?: IPaymentInstallment[];
     nextPaymentDate?: Date;
 
     priority?: number;
