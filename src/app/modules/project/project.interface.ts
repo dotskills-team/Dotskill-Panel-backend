@@ -182,3 +182,7 @@ export interface IProject {
     createdAt?: Date;
     updatedAt?: Date;
 }
+
+export interface ISendInvoicePayload {
+    pdfBase64: string;
+}

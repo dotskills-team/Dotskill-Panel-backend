@@ -5,6 +5,7 @@ import { checkAuth } from "../../middlewares/checkAuth";
 import { validateRequest } from "../../middlewares/validateRequest";
 import {
   createProjectValidationSchema,
+  sendInvoiceValidationSchema,
   updateProjectValidationSchema,
 } from "./project.validation";
 import { Role } from "../user/user.interface";
@@ -79,6 +80,13 @@ router.patch(
     Role.ADMIN,
   ),
   ProjectControllers.restoreProject,
+);
+
+router.post(
+  "/:id/send-invoice",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN), 
+  validateRequest(sendInvoiceValidationSchema),
+  ProjectControllers.sendProjectInvoice,
 );
 
 export const ProjectRoutes = router;

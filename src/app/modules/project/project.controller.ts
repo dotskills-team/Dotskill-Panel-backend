@@ -154,6 +154,21 @@ const restoreProject = catchAsync(
     },
 );
 
+const sendProjectInvoice = catchAsync(async (req: Request, res: Response) => {
+    const { id } = req.params ;
+    const { pdfBase64 } = req.body;
+
+    const result = await ProjectServices.sendProjectInvoice(id as string , pdfBase64);
+
+    sendResponse(res, {
+        statusCode: httpStatus.OK,
+        success: true,
+        message: "Invoice sent to client successfully.",
+        data: result.data,
+    });
+});
+
+
 export const ProjectControllers = {
     createProject,
     getProjects,
@@ -162,4 +177,5 @@ export const ProjectControllers = {
     updateProject,
     softDeleteProject,
     restoreProject,
+    sendProjectInvoice
 };

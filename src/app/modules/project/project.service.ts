@@ -2,7 +2,7 @@
 import httpStatus from "http-status-codes";
 import { JwtPayload } from "jsonwebtoken";
 import { Types } from "mongoose";
-
+import { sendMail } from "../../utils/mailer";
 import AppError from "../../errorHelpers/appError";
 import { User } from "../user/user.model";
 import { IProject } from "./project.interface";
@@ -198,7 +198,7 @@ const createProject = async (
   payload: Partial<IProject>,
 ) => {
 
-console.log("Payload received in createProject:", payload); // Debugging line
+  console.log("Payload received in createProject:", payload); // Debugging line
 
 
   if (payload.client) {
@@ -307,7 +307,7 @@ const getProjects = async (
 
     queryBuilder.getMeta(),
   ]);
-  const stats = await getStatusStats(); 
+  const stats = await getStatusStats();
 
   return {
     data,
@@ -520,6 +520,54 @@ const restoreProject = async (
   };
 };
 
+/**
+ * Generate + Send Invoice Email (PDF generated on frontend, sent here as base64)
+ */
+const sendProjectInvoice = async (
+  projectId: string,
+  pdfBase64: string,
+) => {
+  const project = await assertProjectExists(projectId);
+  await project.populate([
+    { path: "client", select: "firstName lastName email" },
+  ]);
+
+  const client = project.client as unknown as {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+  };
+
+  if (!client?.email) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Client does not have an email address on file.",
+    );
+  }
+
+  const pdfBuffer = Buffer.from(pdfBase64, "base64");
+
+  await sendMail({
+    to: client.email,
+    subject: `Invoice for ${project.name}`,
+    html: `
+      <p>Dear ${client.firstName ?? "Client"},</p>
+      <p>Please find attached the invoice for your project <strong>${project.name}</strong>.</p>
+      <p>Thank you for your business.</p>
+    `,
+    attachments: [
+      {
+        filename: `Invoice-${project.name.replace(/\s+/g, "-")}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  return { data: { sent: true } };
+};
+
+
 export const ProjectServices = {
   createProject,
   getProjects,
@@ -528,4 +576,5 @@ export const ProjectServices = {
   updateProject,
   softDeleteProject,
   restoreProject,
+  sendProjectInvoice
 };

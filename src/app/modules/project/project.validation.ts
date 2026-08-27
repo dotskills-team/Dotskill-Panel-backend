@@ -296,3 +296,7 @@ export const createProjectValidationSchema = z.object({
 });
 
 export const updateProjectValidationSchema = createProjectValidationSchema.partial();
+
+export const sendInvoiceValidationSchema = z.object({
+    pdfBase64: z.string().min(1, "PDF data is required"),
+});
