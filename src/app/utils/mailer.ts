@@ -82,37 +82,63 @@
 // };
 
 
-import dns from "dns";
+import dns from "dns/promises";
 import nodemailer from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
-// Render (and some cloud hosts) resolve smtp.gmail.com to IPv6 first, but
-// often don't have outbound IPv6 routing, causing ENETUNREACH. Force IPv4.
-dns.setDefaultResultOrder("ipv4first");
+const SMTP_HOSTNAME = process.env.SMTP_HOST || "smtp.gmail.com";
 
-const transportOptions: SMTPTransport.Options & { family?: number } = {
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === "true",
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-    family: 4,
-    connectionTimeout: 20000,
-    greetingTimeout: 20000,
-    socketTimeout: 30000,
+let transporterPromise: Promise<nodemailer.Transporter<SMTPTransport.SentMessageInfo>> | null = null;
+
+const buildTransporter = async () => {
+    // Render's containers often lack outbound IPv6 routing, but DNS still
+    // returns the IPv6 (AAAA) record first for smtp.gmail.com, causing
+    // ENETUNREACH. Resolve an explicit IPv4 address and connect to that,
+    // while keeping the original hostname for TLS certificate validation
+    // (Gmail's cert is issued for smtp.gmail.com, not the raw IP).
+    let resolvedHost = SMTP_HOSTNAME;
+    try {
+        const { address } = await dns.lookup(SMTP_HOSTNAME, { family: 4 });
+        resolvedHost = address;
+    } catch (err) {
+        console.error("IPv4 DNS lookup failed, falling back to hostname:", err);
+    }
+
+    const transportOptions: SMTPTransport.Options = {
+        host: resolvedHost,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === "true",
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+        },
+        tls: {
+            servername: SMTP_HOSTNAME,
+        },
+        connectionTimeout: 20000,
+        greetingTimeout: 20000,
+        socketTimeout: 30000,
+    };
+
+    const transporter = nodemailer.createTransport(transportOptions);
+
+    transporter.verify((err) => {
+        if (err) {
+            console.error("SMTP transporter verify failed:", err);
+        } else {
+            console.log("SMTP transporter ready.");
+        }
+    });
+
+    return transporter;
 };
 
-const transporter = nodemailer.createTransport(transportOptions as SMTPTransport.Options);
-
-transporter.verify((err) => {
-    if (err) {
-        console.error("SMTP transporter verify failed:", err);
-    } else {
-        console.log("SMTP transporter ready.");
+const getTransporter = () => {
+    if (!transporterPromise) {
+        transporterPromise = buildTransporter();
     }
-});
+    return transporterPromise;
+};
 
 export interface SendMailAttachment {
     filename: string;
@@ -128,6 +154,7 @@ export interface SendMailOptions {
 }
 
 export const sendMail = async ({ to, subject, html, attachments }: SendMailOptions) => {
+    const transporter = await getTransporter();
     await transporter.sendMail({
         from: process.env.MAIL_FROM || process.env.SMTP_USER,
         to,
