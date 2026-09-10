@@ -90,7 +90,7 @@ const assertProjectExists = async (
 const populateOptions = [
   {
     path: "client",
-    select: "firstName lastName email",
+    select: "firstName lastName email phone",
   },
   {
     path: "projectManager",
