@@ -54,6 +54,11 @@ export enum AttachmentType {
   OTHER = "OTHER",
 }
 
+export enum LeadType {
+  WEBSITE = "WEBSITE",
+  SOFTWARE = "SOFTWARE"
+}
+
 export interface ILeadAttachment {
   title: string;
   url: string;
@@ -97,7 +102,8 @@ export interface ILead {
   address?: string;
   source: LeadSource;
   status: LeadStatus;
-    contactStatus?: LeadContactStatus;
+  leadType?: LeadType;
+  contactStatus?: LeadContactStatus;
   nextContactAt?: Date;
   priority: LeadPriority;
   pipelineStage?: string;

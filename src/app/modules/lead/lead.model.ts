@@ -9,6 +9,7 @@ import {
   LeadPriority,
   LeadSource,
   LeadStatus,
+  LeadType,
   PreferredContactMethod,
 } from "./lead.interface";
 
@@ -163,6 +164,14 @@ const leadSchema = new Schema<ILead>(
       default: LeadStatus.NEW,
       index: true,
     },
+
+    leadType: {
+      type: String,
+      enum: Object.values(LeadType),
+      default: LeadType.WEBSITE,
+      index: true,
+    },
+
     contactStatus: {
       type: String,
       enum: Object.values(LeadContactStatus),

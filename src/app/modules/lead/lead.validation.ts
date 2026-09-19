@@ -5,11 +5,13 @@ import {
   LeadPriority,
   LeadSource,
   LeadStatus,
+  LeadType,
   PreferredContactMethod,
 } from "./lead.interface";
 import { objectIdSchema, phoneSchema } from "../user/user.validation";
 
 const statusValues = Object.values(LeadStatus) as [LeadStatus, ...LeadStatus[]];
+const leadTypeValues = Object.values(LeadType) as [LeadType, ...LeadType[]];
 const priorityValues = Object.values(LeadPriority) as [
   LeadPriority,
   ...LeadPriority[],
@@ -71,6 +73,9 @@ export const createLeadValidationSchema = z
       invalid_type_error: `Source must be one of: ${sourceValues.join(", ")}`,
     }),
 
+    leadType: z.enum(leadTypeValues, {
+      invalid_type_error: `Lead type must be one of: ${leadTypeValues.join(", ")}`,
+    }).optional(),
     priority: z.enum(priorityValues).optional(),
 
     pipelineStage: z.string().trim().max(100).optional(),
@@ -156,7 +161,9 @@ export const updateLeadValidationSchema = z
       .optional(),
 
     source: z.enum(sourceValues).optional(),
-
+    leadType: z.enum(leadTypeValues, {
+      invalid_type_error: `Lead type must be one of: ${leadTypeValues.join(", ")}`,
+    }).optional(),
     priority: z.enum(priorityValues).optional(),
 
     pipelineStage: z.string().trim().max(100).optional(),
@@ -215,7 +222,7 @@ export const updateLeadStatusValidationSchema = z
   })
   .strict();
 
-  export const updateLeadContactStatusValidationSchema = z
+export const updateLeadContactStatusValidationSchema = z
   .object({
     contactStatus: z.enum(contactStatusValues, {
       required_error: "Contact status is required.",
@@ -284,7 +291,7 @@ export const addNoteValidationSchema = z
   })
   .strict();
 
-  
+
 
 export const addAttachmentValidationSchema = z
   .object({
