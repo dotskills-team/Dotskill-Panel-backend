@@ -48,6 +48,22 @@ const importLeads = catchAsync(async (req, res) => {
   });
 });
 
+// const getLeads = catchAsync(
+//   async (req: Request, res: Response, _next: NextFunction) => {
+//     const result = await LeadServices.getLeads(
+//       req.query as Record<string, string>,
+//     );
+
+//     sendResponse(res, {
+//       statusCode: httpStatus.OK,
+//       success: true,
+//       message: "Leads retrieved successfully.",
+//       data: result.data,
+//       meta: result.meta,
+//     });
+//   },
+// );
+
 const getLeads = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const result = await LeadServices.getLeads(
@@ -60,6 +76,7 @@ const getLeads = catchAsync(
       message: "Leads retrieved successfully.",
       data: result.data,
       meta: result.meta,
+      stats: result.stats,
     });
   },
 );

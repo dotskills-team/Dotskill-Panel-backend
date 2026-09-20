@@ -455,6 +455,96 @@ const createLead = async (
   return { data: lead };
 };
 
+// const getLeads = async (query: Record<string, string>) => {
+//   const dateFilterObj = buildDateFilter(query);
+
+//   const baseFilter: Record<string, any> = {
+//     isDeleted: false,
+//     ...dateFilterObj,
+//   };
+
+//   const queryBuilder = new QueryBuilder(Lead.find(baseFilter), query);
+
+//   const leadsQuery = queryBuilder
+//     .filter()
+//     .search(leadSearchableFields)
+//     .sort()
+//     .fields()
+//     .paginate();
+
+//   const [data, meta] = await Promise.all([
+//     leadsQuery.build().populate(populateOptions),
+//     queryBuilder.getMeta(),
+//   ]);
+
+//   return { data, meta };
+// };
+
+
+export interface ILeadStats {
+  totalCount: number;
+  convertedCount: number;
+  conversionRate: number;
+  statusCounts: Record<LeadStatus, number>;
+  contactStatusCounts: Record<LeadContactStatus, number>;
+}
+
+const getLeadStats = async (
+  match: Record<string, any>,
+): Promise<ILeadStats> => {
+  const [agg] = await Lead.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        overview: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+              converted: { $sum: { $cond: ["$isConverted", 1, 0] } },
+            },
+          },
+        ],
+        byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+        byContactStatus: [
+          { $group: { _id: "$contactStatus", count: { $sum: 1 } } },
+        ],
+      },
+    },
+  ]);
+
+  const totalCount: number = agg?.overview?.[0]?.total ?? 0;
+  const convertedCount: number = agg?.overview?.[0]?.converted ?? 0;
+
+  // Every enum key is present, defaulting to 0
+  const statusCounts = Object.values(LeadStatus).reduce(
+    (acc, s) => ({ ...acc, [s]: 0 }),
+    {} as Record<LeadStatus, number>,
+  );
+  const contactStatusCounts = Object.values(LeadContactStatus).reduce(
+    (acc, s) => ({ ...acc, [s]: 0 }),
+    {} as Record<LeadContactStatus, number>,
+  );
+
+  for (const item of agg?.byStatus ?? []) {
+    if (item._id in statusCounts) statusCounts[item._id as LeadStatus] = item.count;
+  }
+  for (const item of agg?.byContactStatus ?? []) {
+    if (item._id in contactStatusCounts)
+      contactStatusCounts[item._id as LeadContactStatus] = item.count;
+  }
+
+  return {
+    totalCount,
+    convertedCount,
+    conversionRate: totalCount
+      ? Number(((convertedCount / totalCount) * 100).toFixed(1))
+      : 0,
+    statusCounts,
+    contactStatusCounts,
+  };
+};
+
 const getLeads = async (query: Record<string, string>) => {
   const dateFilterObj = buildDateFilter(query);
 
@@ -472,12 +562,13 @@ const getLeads = async (query: Record<string, string>) => {
     .fields()
     .paginate();
 
-  const [data, meta] = await Promise.all([
+  const [data, meta, stats] = await Promise.all([
     leadsQuery.build().populate(populateOptions),
     queryBuilder.getMeta(),
+    getLeadStats(baseFilter),
   ]);
 
-  return { data, meta };
+  return { data, meta, stats };
 };
 
 const getDeletedLeads = async (query: Record<string, string>) => {
