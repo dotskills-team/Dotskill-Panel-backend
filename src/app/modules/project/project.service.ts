@@ -117,6 +117,74 @@ const sanitizeQuery = (
   return sanitized;
 };
 
+// Project document er kon field er upor date filter cholbe
+const PROJECT_DATE_FIELD = "startDate";
+
+// "2026-06-18" -> oi din er 00:00:00.000 theke 23:59:59.999 (UTC)
+const getDayBoundariesUTC = (dateStr: string) => {
+  const d = new Date(dateStr);
+
+  const start = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
+  );
+
+  const end = new Date(
+    Date.UTC(
+      d.getUTCFullYear(),
+      d.getUTCMonth(),
+      d.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
+
+  return { start, end };
+};
+
+// Rules:
+// - startDate + endDate  -> duita din er moddhe (inclusive range)
+// - shudhu startDate     -> shudhu oi ek din
+// - shudhu endDate       -> shudhu oi ek din
+// - kono tai na          -> filter nai
+const buildDateRangeFilter = (
+  startDateStr?: string,
+  endDateStr?: string,
+): { $gte: Date; $lte: Date } | null => {
+  if (startDateStr && endDateStr) {
+    return {
+      $gte: getDayBoundariesUTC(startDateStr).start,
+      $lte: getDayBoundariesUTC(endDateStr).end,
+    };
+  }
+
+  const single = startDateStr || endDateStr;
+
+  if (single) {
+    const { start, end } = getDayBoundariesUTC(single);
+    return { $gte: start, $lte: end };
+  }
+
+  return null;
+};
+
+// Query theke startDate/endDate ber kore Mongo filter banay, ar query theke
+// oi key gulo delete kore dey jate QueryBuilder eta ke normal field filter
+// hishebe na dhore.
+const buildDateFilter = (query: Record<string, string>) => {
+  const startDateStr = query["startDate"];
+  const endDateStr = query["endDate"];
+
+  delete query.startDate;
+  delete query.endDate;
+
+  const range = buildDateRangeFilter(startDateStr, endDateStr);
+
+  return range ? { [PROJECT_DATE_FIELD]: range } : {};
+};
+
+
 /**
  * Reorders priorities when a project's priority changes.
  *
@@ -142,7 +210,6 @@ const reorderPriority = async (
   if (oldPriority === undefined) {
     const projectsToShift = await Project.find({
       priority: { $gte: newPriority },
-      isDeleted: false,
       ...excludeFilter,
     })
       .sort({ priority: -1 })
@@ -246,13 +313,113 @@ const createProject = async (
   };
 };
 
+// const getStatusStats = async (filter: Record<string, unknown> = {}) => {
+//   const stats = await Project.aggregate([
+//     {
+//       $match: {
+//         isDeleted: { $ne: true },
+//         ...filter,
+//       },
+//     },
+//     {
+//       $group: {
+//         _id: "$status",
+//         count: { $sum: 1 },
+//       },
+//     },
+//   ]);
+
+//   const result = {
+//     total: 0,
+//     Planning: 0,
+//     InProgress: 0,
+//     OnHold: 0,
+//     Completed: 0,
+//     DoneDue: 0,
+//     Delivered: 0,
+//   };
+
+//   stats.forEach((s) => {
+//     switch (s._id) {
+//       case "PLANNING":
+//         result.Planning = s.count;
+//         break;
+
+//       case "IN_PROGRESS":
+//         result.InProgress = s.count;
+//         break;
+
+//       case "ON_HOLD":
+//         result.OnHold = s.count;
+//         break;
+
+//       case "COMPLETED":
+//         result.Completed = s.count;
+//         break;
+
+//       case "DONE_DUE":
+//         result.DoneDue = s.count;
+//         break;
+
+//       case "DELIVERED":
+//         result.Delivered = s.count;
+//         break;
+//     }
+
+//     result.total += s.count;
+//   });
+
+//   return result;
+// };
+
 const getStatusStats = async (filter: Record<string, unknown> = {}) => {
-  const stats = await Project.aggregate([
-    { $match: { isDeleted: { $ne: true }, ...filter } },
+  const [agg] = await Project.aggregate([
     {
-      $group: {
-        _id: "$status",
-        count: { $sum: 1 },
+      $match: {
+        isDeleted: { $ne: true },
+        ...filter,
+      },
+    },
+    {
+      $facet: {
+        byStatus: [
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ],
+        amounts: [
+          {
+            $project: {
+              budget: { $ifNull: ["$budget", 0] },
+              paid: {
+                $sum: {
+                  $map: {
+                    input: {
+                      $filter: {
+                        input: { $ifNull: ["$payments", []] },
+                        as: "p",
+                        cond: { $eq: ["$$p.status", "COMPLETE"] },
+                      },
+                    },
+                    as: "p",
+                    in: { $ifNull: ["$$p.amount", 0] },
+                  },
+                },
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalValue: { $sum: "$budget" },
+              totalPaid: { $sum: "$paid" },
+              totalDue: { $sum: { $subtract: ["$budget", "$paid"] } },
+            },
+          },
+        ],
       },
     },
   ]);
@@ -263,20 +430,40 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
     InProgress: 0,
     OnHold: 0,
     Completed: 0,
+    DoneDue: 0,
+    Delivered: 0,
+    totalValue: agg?.amounts?.[0]?.totalValue ?? 0,
+    totalPaid: agg?.amounts?.[0]?.totalPaid ?? 0,
+    totalDue: agg?.amounts?.[0]?.totalDue ?? 0,
   };
 
-  stats.forEach((s) => {
-    const key = s._id as keyof typeof result;
-    if (key in result) {
-      result[key] = s.count;
-      result.total += s.count;
+  (agg?.byStatus ?? []).forEach((s: { _id: string; count: number }) => {
+    switch (s._id) {
+      case "PLANNING":
+        result.Planning = s.count;
+        break;
+      case "IN_PROGRESS":
+        result.InProgress = s.count;
+        break;
+      case "ON_HOLD":
+        result.OnHold = s.count;
+        break;
+      case "COMPLETED":
+        result.Completed = s.count;
+        break;
+      case "DONE_DUE":
+        result.DoneDue = s.count;
+        break;
+      case "DELIVERED":
+        result.Delivered = s.count;
+        break;
     }
+
+    result.total += s.count;
   });
 
   return result;
 };
-
-
 
 /**
  * Get All Active Projects
@@ -284,13 +471,22 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
 const getProjects = async (
   query: Record<string, string>,
 ) => {
+  const cleanQuery = sanitizeQuery(query);
+  const dateFilterObj = buildDateFilter(cleanQuery);
+
+  // Default sort: startDate desc (Sept upore, June niche)
+  if (!cleanQuery.sort) {
+    cleanQuery.sort = "-startDate";
+  }
+
   const baseFilter: Record<string, any> = {
     isDeleted: false,
+    ...dateFilterObj,
   };
 
   const queryBuilder = new QueryBuilder(
     Project.find(baseFilter),
-    sanitizeQuery(query),
+    cleanQuery,
   );
 
   const projectsQuery = queryBuilder
@@ -300,14 +496,14 @@ const getProjects = async (
     .fields()
     .paginate();
 
-  const [data, meta] = await Promise.all([
+  const [data, meta, stats] = await Promise.all([
     projectsQuery
       .build()
       .populate(populateOptions),
 
     queryBuilder.getMeta(),
+    getStatusStats(dateFilterObj),
   ]);
-  const stats = await getStatusStats();
 
   return {
     data,
@@ -315,7 +511,6 @@ const getProjects = async (
     stats,
   };
 };
-
 /**
  * Get Deleted Projects
  */
