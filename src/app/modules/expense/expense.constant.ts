@@ -1,0 +1,1 @@
+export const EXPENSE_SEARCHABLE_FIELDS = ["description", "reference"];
