@@ -1,3 +1,4 @@
+
 import httpStatus from "http-status-codes";
 import bcryptjs from "bcryptjs";
 import { Types } from "mongoose";
@@ -90,6 +91,51 @@ const sanitizeQuery = (query: Record<string, string>) => {
   return sanitized;
 };
 
+export interface IUserStats {
+  totalCount: number;
+  ACTIVE: number;
+  INACTIVE: number;
+  SUSPENDED: number;
+}
+
+const getUserStats = async (
+  match: Record<string, any>,
+): Promise<IUserStats> => {
+  const [agg] = await User.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        overview: [
+          {
+            $group: {
+              _id: null,
+              total: { $sum: 1 },
+            },
+          },
+        ],
+        byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+      },
+    },
+  ]);
+
+  const totalCount: number = agg?.overview?.[0]?.total ?? 0;
+
+  const stats: IUserStats = {
+    totalCount,
+    ACTIVE: 0,
+    INACTIVE: 0,
+    SUSPENDED: 0,
+  };
+
+  for (const item of agg?.byStatus ?? []) {
+    if (item._id in stats) {
+      stats[item._id as UserStatus] = item.count;
+    }
+  }
+
+  return stats;
+};
+
 const createUserService = async (
   payload: Partial<IUser>,
   decodedToken?: JwtPayload,
@@ -160,12 +206,13 @@ const getUsers = async (query: Record<string, string>) => {
     .fields()
     .paginate();
 
-  const [data, meta] = await Promise.all([
+  const [data, meta, stats] = await Promise.all([
     usersQuery.build(),
     queryBuilder.getMeta(),
+    getUserStats(baseFilter),
   ]);
 
-  return { data, meta };
+  return { data, meta, stats };
 };
 
 const getDeletedUsers = async (query: Record<string, string>) => {

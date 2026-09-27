@@ -1,17 +1,17 @@
 
 import httpStatus from "http-status-codes";
 import { JwtPayload } from "jsonwebtoken";
-// import mongoose, { Types } from "mongoose";
+import { Types } from "mongoose";
 import { sendMail } from "../../utils/mailer";
 import AppError from "../../errorHelpers/appError";
 import { User } from "../user/user.model";
-import { IPayment, IProject, PaymentStatus } from "./project.interface";
+import { IProject } from "./project.interface";
 import { Project } from "./project.model";
 import { QueryBuilder } from "../../utils/QueryBuilder";
 import { projectSearchableFields } from "./project.constants";
 import { Client } from "../clients/client.model";
-import { FinancialAccount } from "../financial-account/financial-account.model";
-import mongoose, { Types, ClientSession } from "mongoose";
+import { Role } from "../user/user.interface";
+
 const toObjectId = (id: string) => new Types.ObjectId(id);
 
 const assertValidObjectId = (
@@ -87,59 +87,6 @@ const assertProjectExists = async (
 
   return project;
 };
-
-
-
-
-
-
-const validatePayments = async (
-  payments: IPayment[] = [],
-) => {
-    console.log("VALIDATING PAYMENTS:", JSON.stringify(payments, null, 2));
-
-  for (const payment of payments) {
-    if (
-      payment.status === PaymentStatus.COMPLETE &&
-      !payment.financialAccountId
-    ) {
-      throw new AppError(
-        httpStatus.BAD_REQUEST,
-        "Financial account is required for completed payment.",
-      );
-    }
-
-    if (payment.financialAccountId) {
-      assertValidObjectId(
-        payment.financialAccountId.toString(),
-        "Financial Account ID",
-      );
-
-      const account = await FinancialAccount.findOne({
-        _id: payment.financialAccountId,
-        isDeleted: false,
-        status: "ACTIVE",
-      });
-
-      if (!account) {
-        throw new AppError(
-          httpStatus.BAD_REQUEST,
-          "Financial account does not exist or is inactive.",
-        );
-      }
-    }
-  }
-};
-
-
-
-
-
-
-
-
-
-
 
 const populateOptions = [
   {
@@ -255,7 +202,6 @@ const reorderPriority = async (
   newPriority: number,
   oldPriority?: number,
   excludeProjectId?: string,
-  session?: ClientSession,
 ) => {
   const excludeFilter = excludeProjectId
     ? { _id: { $ne: toObjectId(excludeProjectId) } }
@@ -268,270 +214,60 @@ const reorderPriority = async (
       ...excludeFilter,
     })
       .sort({ priority: -1 })
-      .select("_id priority")
-      .session(session ?? null);
+      .select("_id priority");
 
     for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(
-        proj._id,
-        {
-          priority: (proj.priority as number) + 1,
-        },
-        {
-          session,
-        },
-      );
+      await Project.findByIdAndUpdate(proj._id, {
+        priority: (proj.priority as number) + 1,
+      });
     }
-
     return;
   }
 
   if (newPriority === oldPriority) return;
 
   if (newPriority < oldPriority) {
-    // e.g. 5 -> 1:
-    // shift [1, 4] down by +1
+    // e.g. 5 -> 1: shift [1, 4] down by +1 (highest first, avoids unique collisions)
     const projectsToShift = await Project.find({
-      priority: {
-        $gte: newPriority,
-        $lt: oldPriority,
-      },
+      priority: { $gte: newPriority, $lt: oldPriority },
       isDeleted: false,
       ...excludeFilter,
     })
       .sort({ priority: -1 })
-      .select("_id priority")
-      .session(session ?? null);
+      .select("_id priority");
 
     for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(
-        proj._id,
-        {
-          priority: (proj.priority as number) + 1,
-        },
-        {
-          session,
-        },
-      );
+      await Project.findByIdAndUpdate(proj._id, {
+        priority: (proj.priority as number) + 1,
+      });
     }
   } else {
-    // e.g. 1 -> 5:
-    // shift (1, 5] up by -1
+    // e.g. 1 -> 5: shift (1, 5] up by -1 (lowest first, avoids unique collisions)
     const projectsToShift = await Project.find({
-      priority: {
-        $gt: oldPriority,
-        $lte: newPriority,
-      },
+      priority: { $gt: oldPriority, $lte: newPriority },
       isDeleted: false,
       ...excludeFilter,
     })
       .sort({ priority: 1 })
-      .select("_id priority")
-      .session(session ?? null);
+      .select("_id priority");
 
     for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(
-        proj._id,
-        {
-          priority: (proj.priority as number) - 1,
-        },
-        {
-          session,
-        },
-      );
+      await Project.findByIdAndUpdate(proj._id, {
+        priority: (proj.priority as number) - 1,
+      });
     }
   }
 };
-// const reorderPriority = async (
-//   newPriority: number,
-//   oldPriority?: number,
-//   excludeProjectId?: string,
-//   session?: ClientSession,
-
-// ) => {
-//   const excludeFilter = excludeProjectId
-//     ? { _id: { $ne: toObjectId(excludeProjectId) } }
-//     : {};
-
-//   // Create case: no oldPriority, just make room by pushing everything down.
-//   if (oldPriority === undefined) {
-//     const projectsToShift = await Project.find({
-//       priority: { $gte: newPriority },
-//       ...excludeFilter,
-//     })
-//       .sort({ priority: -1 })
-//       .select("_id priority");
-//         .session(session ?? null);
-
-//     for (const proj of projectsToShift) {
-//       await Project.findByIdAndUpdate(proj._id, {
-//         priority: (proj.priority as number) + 1,
-//       });
-//     }
-//     return;
-//   }
-
-//   if (newPriority === oldPriority) return;
-
-//   if (newPriority < oldPriority) {
-//     // e.g. 5 -> 1: shift [1, 4] down by +1 (highest first, avoids unique collisions)
-//     const projectsToShift = await Project.find({
-//       priority: { $gte: newPriority, $lt: oldPriority },
-//       isDeleted: false,
-//       ...excludeFilter,
-//     })
-//       .sort({ priority: -1 })
-//       .select("_id priority");
-
-//     for (const proj of projectsToShift) {
-//       await Project.findByIdAndUpdate(proj._id, {
-//         priority: (proj.priority as number) + 1,
-//       });
-//     }
-//   } else {
-//     // e.g. 1 -> 5: shift (1, 5] up by -1 (lowest first, avoids unique collisions)
-//     const projectsToShift = await Project.find({
-//       priority: { $gt: oldPriority, $lte: newPriority },
-//       isDeleted: false,
-//       ...excludeFilter,
-//     })
-//       .sort({ priority: 1 })
-//       .select("_id priority");
-
-//     for (const proj of projectsToShift) {
-//       await Project.findByIdAndUpdate(proj._id, {
-//         priority: (proj.priority as number) - 1,
-//       });
-//     }
-//   }
-// };
 
 /**
  * Create Project
  */
-// const createProject = async (
-//   payload: Partial<IProject>,
-// ) => {
-
-//   console.log("Payload received in createProject:", payload); // Debugging line
-
-
-//   if (payload.client) {
-//     await assertClientExists(
-//       payload.client.toString(),
-//       "Client ID",
-//     );
-//   }
-
-//   if (payload.projectManager) {
-//     await assertUserExists(
-//       payload.projectManager.toString(),
-//       "Project manager ID",
-//     );
-//   }
-
-//   if (payload.developers?.length) {
-//     await Promise.all(
-//       payload.developers.map((developer) =>
-//         assertUserExists(
-//           developer.toString(),
-//           "Developer ID",
-//         ),
-//       ),
-//     );
-//   }
-//   await validatePayments(payload.payments ?? []);
-
-//   if (payload.priority !== undefined) {
-//     await reorderPriority(payload.priority);
-//   }
-
-//   const project = await Project.create({
-//     ...payload,
-//     isDeleted: false,
-//     isActive: true,
-//   });
-// await applyBalanceDiff([], project.payments ?? []);
-
-//   const populatedProject =
-//     await Project.findById(project._id).populate(
-//       populateOptions,
-//     );
-
-//   return {
-//     data: populatedProject,
-//   };
-// };
-
-// const getStatusStats = async (filter: Record<string, unknown> = {}) => {
-//   const stats = await Project.aggregate([
-//     {
-//       $match: {
-//         isDeleted: { $ne: true },
-//         ...filter,
-//       },
-//     },
-//     {
-//       $group: {
-//         _id: "$status",
-//         count: { $sum: 1 },
-//       },
-//     },
-//   ]);
-
-//   const result = {
-//     total: 0,
-//     Planning: 0,
-//     InProgress: 0,
-//     OnHold: 0,
-//     Completed: 0,
-//     DoneDue: 0,
-//     Delivered: 0,
-//   };
-
-//   stats.forEach((s) => {
-//     switch (s._id) {
-//       case "PLANNING":
-//         result.Planning = s.count;
-//         break;
-
-//       case "IN_PROGRESS":
-//         result.InProgress = s.count;
-//         break;
-
-//       case "ON_HOLD":
-//         result.OnHold = s.count;
-//         break;
-
-//       case "COMPLETED":
-//         result.Completed = s.count;
-//         break;
-
-//       case "DONE_DUE":
-//         result.DoneDue = s.count;
-//         break;
-
-//       case "DELIVERED":
-//         result.Delivered = s.count;
-//         break;
-//     }
-
-//     result.total += s.count;
-//   });
-
-//   return result;
-// };
 const createProject = async (
   payload: Partial<IProject>,
 ) => {
-  console.log(
-    "Payload received in createProject:",
-    payload,
-  );
 
-  // -----------------------------
-  // Validation
-  // -----------------------------
+  console.log("Payload received in createProject:", payload); // Debugging line
+
 
   if (payload.client) {
     await assertClientExists(
@@ -558,68 +294,33 @@ const createProject = async (
     );
   }
 
-  await validatePayments(payload.payments ?? []);
-
-  // -----------------------------
-  // Transaction
-  // -----------------------------
-
-  const session = await mongoose.startSession();
-
-  try {
-    let createdProject;
-
-    await session.withTransaction(async () => {
-      // Priority reorder
-      if (payload.priority !== undefined) {
-        await reorderPriority(
-          payload.priority,
-          undefined,
-          undefined,
-          session,
-        );
-      }
-
-      // Create project
-      const [project] = await Project.create(
-        [
-          {
-            ...payload,
-            isDeleted: false,
-            isActive: true,
-          },
-        ],
-        { session },
-      );
-
-      createdProject = project;
-
-      // Update financial account balance
-      await applyBalanceDiff(
-        [],
-        project.payments ?? [],
-        session,
-      );
-    });
-
-    // Populate AFTER transaction
-    const populatedProject =
-      await Project.findById(createdProject!._id).populate(
-        populateOptions,
-      );
-
-    return {
-      data: populatedProject,
-    };
-  } finally {
-    await session.endSession();
+  if (payload.priority !== undefined) {
+    await reorderPriority(payload.priority);
   }
+
+  const project = await Project.create({
+    ...payload,
+    isDeleted: false,
+    isActive: true,
+  });
+
+  const populatedProject =
+    await Project.findById(project._id).populate(
+      populateOptions,
+    );
+
+  return {
+    data: populatedProject,
+  };
 };
+
+
 const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   const [agg] = await Project.aggregate([
     {
       $match: {
         isDeleted: { $ne: true },
+        status: { $ne: "CANCELLED" },
         ...filter,
       },
     },
@@ -659,7 +360,11 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
               _id: null,
               totalValue: { $sum: "$budget" },
               totalPaid: { $sum: "$paid" },
-              totalDue: { $sum: { $subtract: ["$budget", "$paid"] } },
+              totalDue: {
+                $sum: {
+                  $subtract: ["$budget", "$paid"],
+                },
+              },
             },
           },
         ],
@@ -680,30 +385,37 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
     totalDue: agg?.amounts?.[0]?.totalDue ?? 0,
   };
 
-  (agg?.byStatus ?? []).forEach((s: { _id: string; count: number }) => {
-    switch (s._id) {
-      case "PLANNING":
-        result.Planning = s.count;
-        break;
-      case "IN_PROGRESS":
-        result.InProgress = s.count;
-        break;
-      case "ON_HOLD":
-        result.OnHold = s.count;
-        break;
-      case "COMPLETED":
-        result.Completed = s.count;
-        break;
-      case "DONE_DUE":
-        result.DoneDue = s.count;
-        break;
-      case "DELIVERED":
-        result.Delivered = s.count;
-        break;
-    }
+  (agg?.byStatus ?? []).forEach(
+    (s: { _id: string; count: number }) => {
+      switch (s._id) {
+        case "PLANNING":
+          result.Planning = s.count;
+          break;
 
-    result.total += s.count;
-  });
+        case "IN_PROGRESS":
+          result.InProgress = s.count;
+          break;
+
+        case "ON_HOLD":
+          result.OnHold = s.count;
+          break;
+
+        case "COMPLETED":
+          result.Completed = s.count;
+          break;
+
+        case "DONE_DUE":
+          result.DoneDue = s.count;
+          break;
+
+        case "DELIVERED":
+          result.Delivered = s.count;
+          break;
+      }
+
+      result.total += s.count;
+    }
+  );
 
   return result;
 };
@@ -809,173 +521,11 @@ const getProjectById = async (
 /**
  * Update Project
  */
-
-
-
-
-
-
-
-
-
-
-const sumCompletedByAccount = (
-  payments: IPayment[] = [],
-): Map<string, number> => {
-  const map = new Map<string, number>();
-
-  for (const payment of payments) {
-    if (
-      payment.status !== PaymentStatus.COMPLETE ||
-      !payment.financialAccountId
-    ) {
-      continue;
-    }
-
-    const accountId = payment.financialAccountId.toString();
-    const amount = Number(payment.amount) || 0;
-
-    map.set(
-      accountId,
-      (map.get(accountId) ?? 0) + amount,
-    );
-  }
-
-  return map;
-};
-
-const applyBalanceDiff = async (
-  oldPayments: IPayment[] = [],
-  newPayments?: IPayment[],
-   session?: ClientSession,
-) => {
-  if (!newPayments) return;
-
-  const oldSums = sumCompletedByAccount(oldPayments);
-  const newSums = sumCompletedByAccount(newPayments);
-
-  const allAccountIds = new Set([
-    ...oldSums.keys(),
-    ...newSums.keys(),
-  ]);
-
-  for (const accountId of allAccountIds) {
-    const oldAmount = oldSums.get(accountId) ?? 0;
-    const newAmount = newSums.get(accountId) ?? 0;
-
-    const diff = newAmount - oldAmount;
-
-    if (diff === 0) continue;
-
-    await FinancialAccount.findOneAndUpdate(
-      {
-        _id: accountId,
-        isDeleted: false,
-      },
-      {
-        $inc: {
-          currentBalance: diff,
-        },
-        
-      },
-      {
-    session,
-  },
-    );
-  }
-};
-
-// const updateProject = async (
-//   projectId: string,
-//   payload: Partial<IProject>,
-// ) => {
-//   const existingProject = await assertProjectExists(projectId); // ⬅️ এটা আগেও ছিল
-
-//   if (payload.client) {
-//     await assertClientExists(payload.client.toString(), "Client ID");
-//   }
-
-//   if (payload.projectManager) {
-//     await assertUserExists(payload.projectManager.toString(), "Project manager ID");
-//   }
-
-//   if (payload.developers?.length) {
-//     await Promise.all(
-//       payload.developers.map((developer) =>
-//         assertUserExists(developer.toString(), "Developer ID"),
-//       ),
-//     );
-//   }
-// if (payload.payments !== undefined) {
-//   await validatePayments(payload.payments as IPayment[]);
-// }
-//   if (payload.priority !== undefined) {
-//     const currentProject = await Project.findById(projectId).select("priority");
-//     if (currentProject?.priority !== payload.priority) {
-//       await reorderPriority(payload.priority, currentProject?.priority, projectId);
-//     }
-//   }
-
-//   const { isDeleted, deletedAt, deletedBy, ...safePayload } = payload;
-
-//   // const updatedProject = await Project.findOneAndUpdate(
-//   //   { _id: projectId, isDeleted: false },
-//   //   safePayload,
-//   //   { new: true, runValidators: true },
-//   // ).populate(populateOptions);
-
-//   // if (!updatedProject) {
-//   //   throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
-//   // }
-
-//   // // ⬇️ নতুন — payments বদলালে account balance adjust করুন
-//   // await applyBalanceDiff(existingProject.payments ?? [], payload.payments as IPayment[] | undefined);
-
-//   // return { data: updatedProject };
-//   const updatedProject = await Project.findOneAndUpdate(
-//   {
-//     _id: projectId,
-//     isDeleted: false,
-//   },
-//   safePayload,
-//   {
-//     new: true,
-//     runValidators: true,
-//   },
-// ).populate(populateOptions);
-
-// if (!updatedProject) {
-//   throw new AppError(
-//     httpStatus.NOT_FOUND,
-//     "Project not found.",
-//   );
-// }
-
-// if (payload.payments !== undefined) {
-//   await applyBalanceDiff(
-//     existingProject.payments ?? [],
-//     updatedProject.payments ?? [],
-//   );
-// }
-
-// return {
-//   data: updatedProject,
-// };
-// };
-
-
-
-
 const updateProject = async (
   projectId: string,
   payload: Partial<IProject>,
 ) => {
-  // -----------------------------
-  // Validation
-  // -----------------------------
-
-  const existingProject =
-    await assertProjectExists(projectId);
+  await assertProjectExists(projectId);
 
   if (payload.client) {
     await assertClientExists(
@@ -1002,16 +552,12 @@ const updateProject = async (
     );
   }
 
-  if (payload.payments !== undefined) {
-    await validatePayments(
-      payload.payments as IPayment[],
-    );
+  if (payload.priority !== undefined) {
+    const currentProject = await Project.findById(projectId).select("priority");
+    if (currentProject?.priority !== payload.priority) {
+      await reorderPriority(payload.priority, currentProject?.priority, projectId);
+    }
   }
-
-  const currentProject =
-    payload.priority !== undefined
-      ? await Project.findById(projectId).select("priority")
-      : null;
 
   const {
     isDeleted,
@@ -1020,73 +566,29 @@ const updateProject = async (
     ...safePayload
   } = payload;
 
-  // -----------------------------
-  // Transaction
-  // -----------------------------
+  const updatedProject =
+    await Project.findOneAndUpdate(
+      {
+        _id: projectId,
+        isDeleted: false,
+      },
+      safePayload,
+      {
+        new: true,
+        runValidators: true,
+      },
+    ).populate(populateOptions);
 
-  const session = await mongoose.startSession();
-
-  try {
-    let updatedProject;
-
-    await session.withTransaction(async () => {
-      // Priority reorder
-      if (
-        payload.priority !== undefined &&
-        currentProject?.priority !== payload.priority
-      ) {
-        await reorderPriority(
-          payload.priority,
-          currentProject?.priority,
-          projectId,
-          session,
-        );
-      }
-
-      // Update project
-      updatedProject =
-        await Project.findOneAndUpdate(
-          {
-            _id: projectId,
-            isDeleted: false,
-          },
-          safePayload,
-          {
-            new: true,
-            runValidators: true,
-            session,
-          },
-        );
-
-      if (!updatedProject) {
-        throw new AppError(
-          httpStatus.NOT_FOUND,
-          "Project not found.",
-        );
-      }
-
-      // Update financial account balance
-      if (payload.payments !== undefined) {
-        await applyBalanceDiff(
-          existingProject.payments ?? [],
-          updatedProject.payments ?? [],
-          session,
-        );
-      }
-    });
-
-    // Populate AFTER transaction
-    const populatedProject =
-      await Project.findById(
-        updatedProject!._id,
-      ).populate(populateOptions);
-
-    return {
-      data: populatedProject,
-    };
-  } finally {
-    await session.endSession();
+  if (!updatedProject) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      "Project not found.",
+    );
   }
+
+  return {
+    data: updatedProject,
+  };
 };
 
 /**
@@ -1215,6 +717,55 @@ const sendProjectInvoice = async (
   return { data: { sent: true } };
 };
 
+const permanentlyDeleteProject = async (
+  projectId: string,
+  decodedToken: JwtPayload,
+) => {
+  if (decodedToken.role !== Role.SUPER_ADMIN) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Only a Super Admin can permanently delete a project.",
+    );
+  }
+
+  assertValidObjectId(projectId, "Project ID");
+
+  const project = await Project.findOne({
+    _id: projectId,
+    isDeleted: true,
+  });
+
+  if (!project) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Only already soft-deleted projects can be permanently deleted.",
+    );
+  }
+
+  const deletedPriority = project.priority;
+
+  await Project.findByIdAndDelete(projectId);
+
+  // Close the gap left in the priority order: every remaining active
+  // project ranked below the deleted one shifts UP by one.
+  if (deletedPriority !== undefined) {
+    const projectsToShift = await Project.find({
+      priority: { $gt: deletedPriority },
+      isDeleted: false,
+    })
+      .sort({ priority: 1 })
+      .select("_id priority");
+
+    for (const proj of projectsToShift) {
+      await Project.findByIdAndUpdate(proj._id, {
+        priority: (proj.priority as number) - 1,
+      });
+    }
+  }
+
+  return { data: null };
+};
+
 
 export const ProjectServices = {
   createProject,
@@ -1224,5 +775,6 @@ export const ProjectServices = {
   updateProject,
   softDeleteProject,
   restoreProject,
-  sendProjectInvoice
+  sendProjectInvoice,
+  permanentlyDeleteProject
 };

@@ -32,13 +32,14 @@ const getUsers = catchAsync(
     const result = await UserServices.getUsers(
       req.query as Record<string, string>,
     );
-
+  
     sendResponse(res, {
       statusCode: httpStatus.OK,
       success: true,
       message: "Users retrieved successfully.",
       data: result.data,
       meta: result.meta,
+      stats: result.stats,
     });
   },
 );
