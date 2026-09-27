@@ -38,6 +38,7 @@ export interface IPayment {
     date: Date;
     status: PaymentStatus;
     note?: string;
+     financialAccountId?: Types.ObjectId; //new
 }
 
 export interface IProjectDocument {

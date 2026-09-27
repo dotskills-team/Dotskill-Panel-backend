@@ -23,6 +23,10 @@ const paymentValidationSchema = z.object({
     .string()
     .trim()
     .optional(),
+
+      financialAccountId: z
+    .string()
+    .optional(),
 });
 
 const projectDocumentValidationSchema = z.object({
