@@ -168,6 +168,25 @@ const sendProjectInvoice = catchAsync(async (req: Request, res: Response) => {
     });
 });
 
+const permanentDeleteProject = catchAsync(
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const decodedToken = req.user as JwtPayload;
+
+    const result = await ProjectServices.permanentlyDeleteProject(
+      id as string,
+      decodedToken,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Project permanently deleted successfully.",
+      data: result.data,
+    });
+  },
+);
+
 
 export const ProjectControllers = {
     createProject,
@@ -177,5 +196,6 @@ export const ProjectControllers = {
     updateProject,
     softDeleteProject,
     restoreProject,
-    sendProjectInvoice
+    sendProjectInvoice,
+    permanentDeleteProject
 };

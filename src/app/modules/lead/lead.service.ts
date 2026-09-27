@@ -3,7 +3,7 @@ import httpStatus from "http-status-codes";
 import mongoose, { AnyBulkWriteOperation, Types } from "mongoose";
 import { JwtPayload } from "jsonwebtoken";
 
-import { ILead, LeadContactStatus, LeadStatus } from "./lead.interface";
+import { ILead, LeadContactStatus, LeadStatus, LeadType } from "./lead.interface";
 import { Lead } from "./lead.model";
 import { leadSearchableFields, MAX_LEAD_IMPORT_ROWS } from "./lead.constants";
 import { User } from "../user/user.model";
@@ -455,29 +455,68 @@ const createLead = async (
   return { data: lead };
 };
 
-// const getLeads = async (query: Record<string, string>) => {
-//   const dateFilterObj = buildDateFilter(query);
+// export interface ILeadStats {
+//   totalCount: number;
+//   convertedCount: number;
+//   conversionRate: number;
+//   statusCounts: Record<LeadStatus, number>;
+//   contactStatusCounts: Record<LeadContactStatus, number>;
+// }
 
-//   const baseFilter: Record<string, any> = {
-//     isDeleted: false,
-//     ...dateFilterObj,
-//   };
-
-//   const queryBuilder = new QueryBuilder(Lead.find(baseFilter), query);
-
-//   const leadsQuery = queryBuilder
-//     .filter()
-//     .search(leadSearchableFields)
-//     .sort()
-//     .fields()
-//     .paginate();
-
-//   const [data, meta] = await Promise.all([
-//     leadsQuery.build().populate(populateOptions),
-//     queryBuilder.getMeta(),
+// const getLeadStats = async (
+//   match: Record<string, any>,
+// ): Promise<ILeadStats> => {
+//   const [agg] = await Lead.aggregate([
+//     { $match: match },
+//     {
+//       $facet: {
+//         overview: [
+//           {
+//             $group: {
+//               _id: null,
+//               total: { $sum: 1 },
+//               converted: { $sum: { $cond: ["$isConverted", 1, 0] } },
+//             },
+//           },
+//         ],
+//         byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+//         byContactStatus: [
+//           { $group: { _id: "$contactStatus", count: { $sum: 1 } } },
+//         ],
+//       },
+//     },
 //   ]);
 
-//   return { data, meta };
+//   const totalCount: number = agg?.overview?.[0]?.total ?? 0;
+//   const convertedCount: number = agg?.overview?.[0]?.converted ?? 0;
+
+//   // Every enum key is present, defaulting to 0
+//   const statusCounts = Object.values(LeadStatus).reduce(
+//     (acc, s) => ({ ...acc, [s]: 0 }),
+//     {} as Record<LeadStatus, number>,
+//   );
+//   const contactStatusCounts = Object.values(LeadContactStatus).reduce(
+//     (acc, s) => ({ ...acc, [s]: 0 }),
+//     {} as Record<LeadContactStatus, number>,
+//   );
+
+//   for (const item of agg?.byStatus ?? []) {
+//     if (item._id in statusCounts) statusCounts[item._id as LeadStatus] = item.count;
+//   }
+//   for (const item of agg?.byContactStatus ?? []) {
+//     if (item._id in contactStatusCounts)
+//       contactStatusCounts[item._id as LeadContactStatus] = item.count;
+//   }
+
+//   return {
+//     totalCount,
+//     convertedCount,
+//     conversionRate: totalCount
+//       ? Number(((convertedCount / totalCount) * 100).toFixed(1))
+//       : 0,
+//     statusCounts,
+//     contactStatusCounts,
+//   };
 // };
 
 
@@ -487,6 +526,7 @@ export interface ILeadStats {
   conversionRate: number;
   statusCounts: Record<LeadStatus, number>;
   contactStatusCounts: Record<LeadContactStatus, number>;
+  leadTypeCounts: Record<LeadType, number>;
 }
 
 const getLeadStats = async (
@@ -509,6 +549,7 @@ const getLeadStats = async (
         byContactStatus: [
           { $group: { _id: "$contactStatus", count: { $sum: 1 } } },
         ],
+        byLeadType: [{ $group: { _id: "$leadType", count: { $sum: 1 } } }],
       },
     },
   ]);
@@ -525,6 +566,10 @@ const getLeadStats = async (
     (acc, s) => ({ ...acc, [s]: 0 }),
     {} as Record<LeadContactStatus, number>,
   );
+  const leadTypeCounts = Object.values(LeadType).reduce(
+    (acc, s) => ({ ...acc, [s]: 0 }),
+    {} as Record<LeadType, number>,
+  );
 
   for (const item of agg?.byStatus ?? []) {
     if (item._id in statusCounts) statusCounts[item._id as LeadStatus] = item.count;
@@ -532,6 +577,10 @@ const getLeadStats = async (
   for (const item of agg?.byContactStatus ?? []) {
     if (item._id in contactStatusCounts)
       contactStatusCounts[item._id as LeadContactStatus] = item.count;
+  }
+  for (const item of agg?.byLeadType ?? []) {
+    if (item._id in leadTypeCounts)
+      leadTypeCounts[item._id as LeadType] = item.count;
   }
 
   return {
@@ -542,6 +591,7 @@ const getLeadStats = async (
       : 0,
     statusCounts,
     contactStatusCounts,
+    leadTypeCounts,
   };
 };
 

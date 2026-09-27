@@ -21,23 +21,9 @@ export const emailSchema = z
 export const passwordSchema = z
   .string({ invalid_type_error: "Password must be a string." })
   .min(8, { message: "Password must be at least 8 characters long." })
-  .max(128, { message: "Password cannot exceed 128 characters." })
-  .regex(/^(?=.*[A-Z])/, {
-    message: "Password must contain at least 1 uppercase letter.",
-  })
-  .regex(/^(?=.*[a-z])/, {
-    message: "Password must contain at least 1 lowercase letter.",
-  })
-  .regex(/^(?=.*\d)/, {
-    message: "Password must contain at least 1 number.",
-  });
 
 export const phoneSchema = z
   .string({ invalid_type_error: "Phone number must be a string." })
-  .regex(/^(?:\+880|0)[1-9]\d{7,9}$/, {
-    message:
-      "Phone number must be valid for Bangladesh. Format: +88XXXXXXXXX or 0XXXXXXXXX",
-  });
 
 const genderValues = Object.values(Gender) as [Gender, ...Gender[]];
 

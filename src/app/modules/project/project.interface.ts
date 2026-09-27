@@ -10,6 +10,7 @@ export enum ProjectStatus {
     CANCELLED = "CANCELLED",
     DONE_DUE = "DONE_DUE",
     DELIVERED = "DELIVERED",
+    PENDING = "PENDING"
 }
 
 export enum ProjectType {
@@ -22,7 +23,12 @@ export enum ProjectType {
     PHP = "PHP",
     MOBILE_APP = "MOBILE_APP",
     UI_UX = "UI_UX",
+     VIDEO_EDITING = "VIDEO_EDITING",
+    SEO = "SEO",
+    IMAGE_DESIGN = "IMAGE_DESIGN",
+    DIGITAL_MARKETING = "DIGITAL_MARKETING",
     OTHER = "OTHER",
+   
 }
 
 export enum PaymentStatus {

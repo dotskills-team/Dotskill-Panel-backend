@@ -89,4 +89,13 @@ router.post(
   ProjectControllers.sendProjectInvoice,
 );
 
+router.delete(
+  "/:id/delete",
+  checkAuth(
+    Role.SUPER_ADMIN,
+  ),
+  ProjectControllers.permanentDeleteProject,
+);
+
+
 export const ProjectRoutes = router;

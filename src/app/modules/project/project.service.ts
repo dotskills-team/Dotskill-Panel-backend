@@ -10,6 +10,7 @@ import { Project } from "./project.model";
 import { QueryBuilder } from "../../utils/QueryBuilder";
 import { projectSearchableFields } from "./project.constants";
 import { Client } from "../clients/client.model";
+import { Role } from "../user/user.interface";
 
 const toObjectId = (id: string) => new Types.ObjectId(id);
 
@@ -313,70 +314,13 @@ const createProject = async (
   };
 };
 
-// const getStatusStats = async (filter: Record<string, unknown> = {}) => {
-//   const stats = await Project.aggregate([
-//     {
-//       $match: {
-//         isDeleted: { $ne: true },
-//         ...filter,
-//       },
-//     },
-//     {
-//       $group: {
-//         _id: "$status",
-//         count: { $sum: 1 },
-//       },
-//     },
-//   ]);
-
-//   const result = {
-//     total: 0,
-//     Planning: 0,
-//     InProgress: 0,
-//     OnHold: 0,
-//     Completed: 0,
-//     DoneDue: 0,
-//     Delivered: 0,
-//   };
-
-//   stats.forEach((s) => {
-//     switch (s._id) {
-//       case "PLANNING":
-//         result.Planning = s.count;
-//         break;
-
-//       case "IN_PROGRESS":
-//         result.InProgress = s.count;
-//         break;
-
-//       case "ON_HOLD":
-//         result.OnHold = s.count;
-//         break;
-
-//       case "COMPLETED":
-//         result.Completed = s.count;
-//         break;
-
-//       case "DONE_DUE":
-//         result.DoneDue = s.count;
-//         break;
-
-//       case "DELIVERED":
-//         result.Delivered = s.count;
-//         break;
-//     }
-
-//     result.total += s.count;
-//   });
-
-//   return result;
-// };
 
 const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   const [agg] = await Project.aggregate([
     {
       $match: {
         isDeleted: { $ne: true },
+        status: { $ne: "CANCELLED" },
         ...filter,
       },
     },
@@ -416,7 +360,11 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
               _id: null,
               totalValue: { $sum: "$budget" },
               totalPaid: { $sum: "$paid" },
-              totalDue: { $sum: { $subtract: ["$budget", "$paid"] } },
+              totalDue: {
+                $sum: {
+                  $subtract: ["$budget", "$paid"],
+                },
+              },
             },
           },
         ],
@@ -437,30 +385,37 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
     totalDue: agg?.amounts?.[0]?.totalDue ?? 0,
   };
 
-  (agg?.byStatus ?? []).forEach((s: { _id: string; count: number }) => {
-    switch (s._id) {
-      case "PLANNING":
-        result.Planning = s.count;
-        break;
-      case "IN_PROGRESS":
-        result.InProgress = s.count;
-        break;
-      case "ON_HOLD":
-        result.OnHold = s.count;
-        break;
-      case "COMPLETED":
-        result.Completed = s.count;
-        break;
-      case "DONE_DUE":
-        result.DoneDue = s.count;
-        break;
-      case "DELIVERED":
-        result.Delivered = s.count;
-        break;
-    }
+  (agg?.byStatus ?? []).forEach(
+    (s: { _id: string; count: number }) => {
+      switch (s._id) {
+        case "PLANNING":
+          result.Planning = s.count;
+          break;
 
-    result.total += s.count;
-  });
+        case "IN_PROGRESS":
+          result.InProgress = s.count;
+          break;
+
+        case "ON_HOLD":
+          result.OnHold = s.count;
+          break;
+
+        case "COMPLETED":
+          result.Completed = s.count;
+          break;
+
+        case "DONE_DUE":
+          result.DoneDue = s.count;
+          break;
+
+        case "DELIVERED":
+          result.Delivered = s.count;
+          break;
+      }
+
+      result.total += s.count;
+    }
+  );
 
   return result;
 };
@@ -762,6 +717,55 @@ const sendProjectInvoice = async (
   return { data: { sent: true } };
 };
 
+const permanentlyDeleteProject = async (
+  projectId: string,
+  decodedToken: JwtPayload,
+) => {
+  if (decodedToken.role !== Role.SUPER_ADMIN) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Only a Super Admin can permanently delete a project.",
+    );
+  }
+
+  assertValidObjectId(projectId, "Project ID");
+
+  const project = await Project.findOne({
+    _id: projectId,
+    isDeleted: true,
+  });
+
+  if (!project) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Only already soft-deleted projects can be permanently deleted.",
+    );
+  }
+
+  const deletedPriority = project.priority;
+
+  await Project.findByIdAndDelete(projectId);
+
+  // Close the gap left in the priority order: every remaining active
+  // project ranked below the deleted one shifts UP by one.
+  if (deletedPriority !== undefined) {
+    const projectsToShift = await Project.find({
+      priority: { $gt: deletedPriority },
+      isDeleted: false,
+    })
+      .sort({ priority: 1 })
+      .select("_id priority");
+
+    for (const proj of projectsToShift) {
+      await Project.findByIdAndUpdate(proj._id, {
+        priority: (proj.priority as number) - 1,
+      });
+    }
+  }
+
+  return { data: null };
+};
+
 
 export const ProjectServices = {
   createProject,
@@ -771,5 +775,6 @@ export const ProjectServices = {
   updateProject,
   softDeleteProject,
   restoreProject,
-  sendProjectInvoice
+  sendProjectInvoice,
+  permanentlyDeleteProject
 };
