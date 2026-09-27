@@ -80,7 +80,18 @@ const getLeads = catchAsync(
     });
   },
 );
+const getFollowUpCalendar = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const result = await LeadServices.getFollowUpCalendar();
 
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Follow-up calendar retrieved successfully.",
+      data: result.data,
+    });
+  },
+);
 const getDeletedLeads = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const result = await LeadServices.getDeletedLeads(
@@ -326,4 +337,6 @@ export const LeadControllers = {
   restoreLead,
   importLeads,
   permanentlyDeleteLead,
+  getFollowUpCalendar, 
+
 };

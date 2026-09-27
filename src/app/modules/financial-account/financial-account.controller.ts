@@ -50,6 +50,17 @@ if (typeof id !== "string") {
     data: result,
   });
 });
+const getFinancialAccountSummary = catchAsync(async (req, res) => {
+  const result = await FinancialAccountService.getFinancialAccountSummary();
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: "Financial account summary retrieved successfully",
+    data: result,
+  });
+});
+
 
 const updateFinancialAccount = catchAsync(async (req, res) => {
       const { id } = req.params;
@@ -94,6 +105,7 @@ export const FinancialAccountController = {
   createFinancialAccount,
   getAllFinancialAccounts,
   getSingleFinancialAccount,
+   getFinancialAccountSummary,
   updateFinancialAccount,
   deleteFinancialAccount,
 };

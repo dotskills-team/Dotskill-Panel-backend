@@ -30,7 +30,11 @@ router.get(
   checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
   LeadControllers.getLeads,
 );
-
+router.get(
+  "/calendar",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  LeadControllers.getFollowUpCalendar,
+);
 router.get(
   "/trash",
   checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER),

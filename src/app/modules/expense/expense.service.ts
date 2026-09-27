@@ -23,11 +23,23 @@ const createExpense = async (payload: Partial<IExpense>, userId: string) => {
     throw new AppError(404, "Expense category not found");
   }
 
+  const amount = payload.amount ?? 0;
+
+  if (account.currentBalance < amount) {
+    throw new AppError(
+      400,
+      `Insufficient balance in "${account.accountName}". Available: ${account.currentBalance}`,
+    );
+  }
+
   const result = await Expense.create({ ...payload, createdBy: userId });
+
+  await FinancialAccount.findByIdAndUpdate(payload.financialAccountId, {
+    $inc: { currentBalance: -amount },
+  });
+
   return result;
 };
-
-
 
 const getAllExpenses = async (query: Record<string, unknown>) => {
   const baseQuery = Expense.find({ isDeleted: false })
@@ -68,6 +80,10 @@ const updateExpense = async (
     throw new AppError(404, "Expense not found");
   }
 
+  const newAccountId =
+    payload.financialAccountId?.toString() ?? expense.financialAccountId.toString();
+  const newAmount = payload.amount ?? expense.amount;
+
   if (payload.financialAccountId) {
     const account = await FinancialAccount.findOne({
       _id: payload.financialAccountId,
@@ -86,6 +102,37 @@ const updateExpense = async (
     if (!category) {
       throw new AppError(404, "Expense category not found");
     }
+  }
+
+  const oldAccountId = expense.financialAccountId.toString();
+  const oldAmount = expense.amount;
+
+  if (oldAccountId === newAccountId) {
+    const diff = newAmount - oldAmount;
+    const account = await FinancialAccount.findById(newAccountId);
+    if (account && account.currentBalance < diff) {
+      throw new AppError(
+        400,
+        `Insufficient balance in "${account.accountName}" for this update.`,
+      );
+    }
+    await FinancialAccount.findByIdAndUpdate(newAccountId, {
+      $inc: { currentBalance: -diff },
+    });
+  } else {
+    const newAccount = await FinancialAccount.findById(newAccountId);
+    if (newAccount && newAccount.currentBalance < newAmount) {
+      throw new AppError(
+        400,
+        `Insufficient balance in "${newAccount.accountName}" for this update.`,
+      );
+    }
+    await FinancialAccount.findByIdAndUpdate(oldAccountId, {
+      $inc: { currentBalance: oldAmount },
+    });
+    await FinancialAccount.findByIdAndUpdate(newAccountId, {
+      $inc: { currentBalance: -newAmount },
+    });
   }
 
   const result = await Expense.findByIdAndUpdate(
@@ -108,6 +155,10 @@ const deleteExpense = async (id: string, userId: string) => {
     { isDeleted: true, deletedBy: userId, deletedAt: new Date() },
     { new: true },
   );
+
+  await FinancialAccount.findByIdAndUpdate(expense.financialAccountId, {
+    $inc: { currentBalance: expense.amount },
+  });
 
   return result;
 };

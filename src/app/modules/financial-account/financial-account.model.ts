@@ -51,7 +51,11 @@ const financialAccountSchema = new Schema<IFinancialAccount>(
       min: 0,
       default: 0,
     },
-
+    currentBalance: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
     currency: {
       type: String,
       trim: true,
