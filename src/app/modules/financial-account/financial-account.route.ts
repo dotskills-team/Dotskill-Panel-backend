@@ -16,7 +16,11 @@ router.post(
   validateRequest(createFinancialAccountZodSchema),
   FinancialAccountController.createFinancialAccount,
 );
-
+router.get(
+  "/summary",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER),
+  FinancialAccountController.getFinancialAccountSummary,
+);
 router.get("/", checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER), FinancialAccountController.getAllFinancialAccounts);
 
 router.get(

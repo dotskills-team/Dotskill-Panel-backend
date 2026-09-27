@@ -970,6 +970,77 @@ const permanentlyDeleteLead = async (
   return { data: null };
 };
 
+
+// Firoj hasan add this services
+
+
+export interface IFollowUpCalendarEntry {
+  date: string; // YYYY-MM-DD
+  leads: {
+    _id: string;
+    fullName: string;
+    phone: string;
+    status: LeadStatus;
+    contactStatus?: LeadContactStatus;
+    nextContactAt: Date;
+    notes: { message: string; createdAt?: Date }[];
+  }[];
+}
+
+// Bangladesh-only app — UTC+6 is fixed (no DST), so this hardcoded
+// offset is safe and won't need to change.
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+
+const getFollowUpCalendar = async () => {
+  const leads = await Lead.find({
+    isDeleted: false,
+    status: LeadStatus.CONFIRMED_MEETING,
+    contactStatus: LeadContactStatus.NEXT_CONTACT,
+    nextContactAt: { $exists: true, $ne: null },
+  })
+    .select("firstName lastName fullName phone status contactStatus nextContactAt notes")
+    .sort({ nextContactAt: 1 });
+
+  const grouped = new Map<string, IFollowUpCalendarEntry["leads"]>();
+
+  for (const lead of leads) {
+    if (!lead.nextContactAt) continue;
+
+    // UTC timestamp-এ ৬ ঘণ্টা (BD offset) যোগ করে Bangladesh local date বের করা
+    const bdDate = new Date(lead.nextContactAt.getTime() + BD_OFFSET_MS);
+
+    const dateKey = `${bdDate.getUTCFullYear()}-${String(bdDate.getUTCMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(bdDate.getUTCDate()).padStart(2, "0")}`;
+
+    const sortedNotes = [...(lead.notes ?? [])].sort(
+      (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0),
+    );
+
+    const entry = {
+      _id: lead._id.toString(),
+      fullName: lead.fullName ?? `${lead.firstName} ${lead.lastName}`,
+      phone: lead.phone,
+      status: lead.status,
+      contactStatus: lead.contactStatus,
+      nextContactAt: lead.nextContactAt,
+      notes: sortedNotes.map((n) => ({ message: n.message, createdAt: n.createdAt })),
+    };
+
+    if (!grouped.has(dateKey)) {
+      grouped.set(dateKey, []);
+    }
+    grouped.get(dateKey)!.push(entry);
+  }
+
+  const result: IFollowUpCalendarEntry[] = Array.from(grouped.entries())
+    .map(([date, leads]) => ({ date, leads }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return { data: result };
+};
+
 export const LeadServices = {
   createLead,
   getLeads,
@@ -986,4 +1057,6 @@ export const LeadServices = {
   importLeads,
   restoreLead,
   permanentlyDeleteLead,
+  getFollowUpCalendar, 
+
 };

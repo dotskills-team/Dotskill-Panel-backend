@@ -21,6 +21,8 @@ export interface IFinancialAccount {
 
   // Financial Information
   openingBalance: number;
+    currentBalance: number; 
+
   currency: string;
 
   // Additional

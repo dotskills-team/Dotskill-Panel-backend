@@ -31,6 +31,13 @@ const paymentSchema = new Schema<IPayment>(
             type: String,
             trim: true,
         },
+
+        financialAccountId: {
+            type: Schema.Types.ObjectId,
+            ref: "FinancialAccount",
+            default: null, // ⬅️ new
+        },
+
     },
     { _id: true, timestamps: false },
 );
