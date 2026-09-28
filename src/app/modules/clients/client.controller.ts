@@ -54,6 +54,7 @@ const getClients = catchAsync(
       message: "Clients retrieved successfully.",
       data: result.data,
       meta: result.meta,
+      stats: result.stats
     });
   },
 );
