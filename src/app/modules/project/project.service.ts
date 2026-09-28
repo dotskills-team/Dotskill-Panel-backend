@@ -185,18 +185,39 @@ const buildDateFilter = (query: Record<string, string>) => {
   return range ? { [PROJECT_DATE_FIELD]: range } : {};
 };
 
+/**
+ * Shifts priorities one project at a time, in the safe order
+ * (avoids unique-index collisions). Soft-deleted projects are included
+ * because they still hold a priority in the unique index.
+ *
+ * delta = +1 -> highest priority number first
+ * delta = -1 -> lowest priority number first
+ */
+const shiftPriorities = async (
+  filter: Record<string, unknown>,
+  delta: 1 | -1,
+) => {
+  const projects = await Project.find(filter)
+    .sort({ priority: delta === 1 ? -1 : 1 })
+    .select("_id priority");
+
+  for (const proj of projects) {
+    await Project.updateOne({ _id: proj._id }, { $inc: { priority: delta } });
+  }
+};
 
 /**
  * Reorders priorities when a project's priority changes.
  *
  * - Create (oldPriority undefined): every project with priority >= newPriority
  *   shifts DOWN in rank (+1), making room at newPriority.
- * - Update, newPriority < oldPriority (moving to a higher priority / smaller
- *   number, e.g. 5 -> 1): projects in [newPriority, oldPriority - 1] shift
- *   DOWN in rank (+1).
- * - Update, newPriority > oldPriority (moving to a lower priority / larger
- *   number, e.g. 1 -> 5): projects in (oldPriority, newPriority] shift UP
- *   in rank (-1).
+ * - Update, newPriority < oldPriority (e.g. 5 -> 1): projects in
+ *   [newPriority, oldPriority) shift +1.
+ * - Update, newPriority > oldPriority (e.g. 1 -> 5): projects in
+ *   (oldPriority, newPriority] shift -1.
+ *
+ * The moved project is parked on a temporary unique value first so it
+ * never collides with the projects being shifted.
  */
 const reorderPriority = async (
   newPriority: number,
@@ -207,56 +228,40 @@ const reorderPriority = async (
     ? { _id: { $ne: toObjectId(excludeProjectId) } }
     : {};
 
-  // Create case: no oldPriority, just make room by pushing everything down.
+  // Create case (or the project had no priority): make room at newPriority.
   if (oldPriority === undefined) {
-    const projectsToShift = await Project.find({
-      priority: { $gte: newPriority },
-      ...excludeFilter,
-    })
-      .sort({ priority: -1 })
-      .select("_id priority");
-
-    for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(proj._id, {
-        priority: (proj.priority as number) + 1,
-      });
-    }
+    await shiftPriorities(
+      { priority: { $gte: newPriority }, ...excludeFilter },
+      1,
+    );
     return;
   }
 
-  if (newPriority === oldPriority) return;
+  if (newPriority === oldPriority || !excludeProjectId) return;
+
+  // Park the moved project on a temporary unique value.
+  await Project.updateOne(
+    { _id: excludeProjectId },
+    { $set: { priority: -Date.now() } },
+  );
 
   if (newPriority < oldPriority) {
-    // e.g. 5 -> 1: shift [1, 4] down by +1 (highest first, avoids unique collisions)
-    const projectsToShift = await Project.find({
-      priority: { $gte: newPriority, $lt: oldPriority },
-      isDeleted: false,
-      ...excludeFilter,
-    })
-      .sort({ priority: -1 })
-      .select("_id priority");
-
-    for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(proj._id, {
-        priority: (proj.priority as number) + 1,
-      });
-    }
+    await shiftPriorities(
+      { priority: { $gte: newPriority, $lt: oldPriority }, ...excludeFilter },
+      1,
+    );
   } else {
-    // e.g. 1 -> 5: shift (1, 5] up by -1 (lowest first, avoids unique collisions)
-    const projectsToShift = await Project.find({
-      priority: { $gt: oldPriority, $lte: newPriority },
-      isDeleted: false,
-      ...excludeFilter,
-    })
-      .sort({ priority: 1 })
-      .select("_id priority");
-
-    for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(proj._id, {
-        priority: (proj.priority as number) - 1,
-      });
-    }
+    await shiftPriorities(
+      { priority: { $gt: oldPriority, $lte: newPriority }, ...excludeFilter },
+      -1,
+    );
   }
+
+  // Put the moved project into its final slot.
+  await Project.updateOne(
+    { _id: excludeProjectId },
+    { $set: { priority: newPriority } },
+  );
 };
 
 /**
@@ -265,10 +270,6 @@ const reorderPriority = async (
 const createProject = async (
   payload: Partial<IProject>,
 ) => {
-
-  console.log("Payload received in createProject:", payload); // Debugging line
-
-
   if (payload.client) {
     await assertClientExists(
       payload.client.toString(),
@@ -313,7 +314,6 @@ const createProject = async (
     data: populatedProject,
   };
 };
-
 
 const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   const [agg] = await Project.aggregate([
@@ -466,6 +466,7 @@ const getProjects = async (
     stats,
   };
 };
+
 /**
  * Get Deleted Projects
  */
@@ -746,26 +747,14 @@ const permanentlyDeleteProject = async (
 
   await Project.findByIdAndDelete(projectId);
 
-  // Close the gap left in the priority order: every remaining active
-  // project ranked below the deleted one shifts UP by one.
-  if (deletedPriority !== undefined) {
-    const projectsToShift = await Project.find({
-      priority: { $gt: deletedPriority },
-      isDeleted: false,
-    })
-      .sort({ priority: 1 })
-      .select("_id priority");
-
-    for (const proj of projectsToShift) {
-      await Project.findByIdAndUpdate(proj._id, {
-        priority: (proj.priority as number) - 1,
-      });
-    }
+  // Close the gap left in the priority order: every remaining project
+  // ranked below the deleted one shifts UP by one.
+  if (deletedPriority !== undefined && deletedPriority !== null) {
+    await shiftPriorities({ priority: { $gt: deletedPriority } }, -1);
   }
 
   return { data: null };
 };
-
 
 export const ProjectServices = {
   createProject,
@@ -776,5 +765,5 @@ export const ProjectServices = {
   softDeleteProject,
   restoreProject,
   sendProjectInvoice,
-  permanentlyDeleteProject
+  permanentlyDeleteProject,
 };
