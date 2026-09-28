@@ -4,6 +4,9 @@ export const clientSearchableFields = [
   "clientCode",
   "companyName",
   "industry",
+  "phone",
+  "firstName",
+  "lastName"
 ];
 
 export const CLIENT_STATUS_OPTIONS = Object.values(ClientStatus);
