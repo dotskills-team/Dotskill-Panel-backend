@@ -8,6 +8,7 @@ import { TeamSalaryRoutes } from "../modules/team-salary/team-salary.route";
 import { FinancialAccountRoutes } from "../modules/financial-account/financial-account.route";
 import { ExpenseCategoryRoutes } from "../modules/expense-category/expense-category.route";
 import { ExpenseRoutes } from "../modules/expense/expense.route";
+import { FundTransferRoutes } from "../modules/fund-transfer/fund-transfer.route";
 
 export const router = Router();
 
@@ -39,6 +40,7 @@ const moduleRoutes = [
   { path: "/financial-accounts", route: FinancialAccountRoutes },
 { path: "/expense-categories", route: ExpenseCategoryRoutes },
 { path: "/expenses", route: ExpenseRoutes },
+{ path: "/fund-transfers", route: FundTransferRoutes },
  
 ];
 

@@ -4,9 +4,14 @@ import { ACCOUNT_TYPE, ACCOUNT_STATUS, PROVIDER_NAME } from "./financial-account
 export const createFinancialAccountZodSchema = z.object({
   accountName: z.string({ required_error: "Account name is required" }).min(2).max(100),
   accountType: z.enum(Object.values(ACCOUNT_TYPE) as [string, ...string[]]),
-  providerName: z.enum(Object.values(PROVIDER_NAME) as [string, ...string[]]).optional(),
+  // providerName: z.enum(Object.values(PROVIDER_NAME) as [string, ...string[]]).optional(),
+  providerName: z
+  .enum(Object.values(PROVIDER_NAME) as [string, ...string[]])
+  .nullable()
+  .optional(),
   accountNumber: z.string().optional(),
   accountHolderName: z.string().optional(),
+  ownerId: z.string().nullable().optional(),
   bankName: z.string().optional(),
   branchName: z.string().optional(),
   openingBalance: z.number().min(0).default(0),

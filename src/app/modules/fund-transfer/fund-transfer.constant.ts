@@ -1,0 +1,1 @@
+export const FUND_TRANSFER_SEARCHABLE_FIELDS = ["reference", "note"];

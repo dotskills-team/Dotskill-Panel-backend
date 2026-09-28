@@ -34,7 +34,12 @@ const financialAccountSchema = new Schema<IFinancialAccount>(
       type: String,
       trim: true,
     },
-
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
     bankName: {
       type: String,
       trim: true,

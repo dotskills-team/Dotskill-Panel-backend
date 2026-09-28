@@ -14,7 +14,7 @@ export interface IFinancialAccount {
   providerName?: ProviderName;
   accountNumber?: string;
   accountHolderName?: string;
-
+ownerId?: Types.ObjectId | null;
   // Bank Information
   bankName?: string;
   branchName?: string;
