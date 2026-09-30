@@ -92,7 +92,7 @@ const assertProjectExists = async (
 const validatePayments = async (
   payments: IPayment[] = [],
 ) => {
-    console.log("VALIDATING PAYMENTS:", JSON.stringify(payments, null, 2));
+  console.log("VALIDATING PAYMENTS:", JSON.stringify(payments, null, 2));
 
   for (const payment of payments) {
     if (
@@ -475,10 +475,18 @@ const createProject = async (
   // -----------------------------
 
   if (payload.client) {
-    await assertClientExists(
-      payload.client.toString(),
-      "Client ID",
-    );
+    // await assertClientExists(
+    //   payload.client.toString(),
+    //   "Client ID",
+    // );
+    const client = await Client.findById(payload.client);
+
+    if (!client) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Client does not exist.",
+      );
+    }
   }
 
   if (payload.projectManager) {
@@ -544,7 +552,7 @@ const createProject = async (
     });
 
 
-   
+
     // Populate AFTER transaction
     const populatedProject =
       await Project.findById(createdProject!._id).populate(
