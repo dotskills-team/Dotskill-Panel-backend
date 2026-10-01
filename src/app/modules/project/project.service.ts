@@ -147,6 +147,9 @@ const populateOptions = [
     path: "deletedBy",
     select: "firstName lastName email",
   },
+{
+ path: "payments.financialAccountId",
+}
 ];
 
 const sanitizeQuery = (
@@ -411,56 +414,6 @@ const assertCompletePaymentsHaveAccount = (payments?: IPayment[]) => {
     );
   }
 };
-/**
- * Create Project
- */
-// const createProject = async (
-//   payload: Partial<IProject>,
-// ) => {
-//   if (payload.client) {
-//     await assertClientExists(
-//       payload.client.toString(),
-//       "Client ID",
-//     );
-//   }
-
-//   if (payload.projectManager) {
-//     await assertUserExists(
-//       payload.projectManager.toString(),
-//       "Project manager ID",
-//     );
-//   }
-
-//   if (payload.developers?.length) {
-//     await Promise.all(
-//       payload.developers.map((developer) =>
-//         assertUserExists(
-//           developer.toString(),
-//           "Developer ID",
-//         ),
-//       ),
-//     );
-//   }
-
-//   if (payload.priority !== undefined) {
-//     await reorderPriority(payload.priority);
-//   }
-
-//   const project = await Project.create({
-//     ...payload,
-//     isDeleted: false,
-//     isActive: true,
-//   });
-
-//   const populatedProject =
-//     await Project.findById(project._id).populate(
-//       populateOptions,
-//     );
-
-//   return {
-//     data: populatedProject,
-//   };
-// };
 
 const createProject = async (
   payload: Partial<IProject>,
@@ -755,7 +708,6 @@ const getProjects = async (
   const cleanQuery = sanitizeQuery(query);
   const dateFilterObj = buildDateFilter(cleanQuery);
 
-  // Default sort: startDate desc (Sept upore, June niche)
   if (!cleanQuery.sort) {
     cleanQuery.sort = "-startDate";
   }
