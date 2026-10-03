@@ -127,9 +127,6 @@ const validatePayments = async (
   }
 };
 
-
-
-
 const populateOptions = [
   {
     path: "client",
@@ -147,9 +144,9 @@ const populateOptions = [
     path: "deletedBy",
     select: "firstName lastName email",
   },
-{
- path: "payments.financialAccountId",
-}
+  {
+    path: "payments.financialAccountId",
+  }
 ];
 
 const sanitizeQuery = (
@@ -520,9 +517,6 @@ const createProject = async (
   }
 };
 
-
-
-
 const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   const [agg] = await Project.aggregate([
     {
@@ -628,10 +622,6 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   return result;
 };
 
-
-
-
-
 const sumCompletedByAccount = (
   payments: IPayment[] = [],
 ): Map<string, number> => {
@@ -683,21 +673,25 @@ const applyBalanceDiff = async (
       { session, new: true },
     );
 
+    // if (!result) {
+    //   throw new AppError(
+    //     httpStatus.BAD_REQUEST,
+    //     diff < 0
+    //       ? "Cannot reduce this payment: the account does not have enough balance to reverse it."
+    //       : "Financial account not found.",
+    //   );
+    // }
+
     if (!result) {
       throw new AppError(
         httpStatus.BAD_REQUEST,
         diff < 0
-          ? "Cannot reduce this payment: the account does not have enough balance to reverse it."
+          ? "Account does not have enough balance to reverse these payments."
           : "Financial account not found.",
       );
     }
   }
 };
-
-
-
-
-
 
 /**
  * Get All Active Projects
@@ -796,80 +790,6 @@ const getProjectById = async (
     data: project,
   };
 };
-
-/**
- * Update Project
- */
-// const updateProject = async (
-//   projectId: string,
-//   payload: Partial<IProject>,
-// ) => {
-//   await assertProjectExists(projectId);
-
-//   if (payload.client) {
-//     await assertClientExists(
-//       payload.client.toString(),
-//       "Client ID",
-//     );
-//   }
-
-//   if (payload.projectManager) {
-//     await assertUserExists(
-//       payload.projectManager.toString(),
-//       "Project manager ID",
-//     );
-//   }
-
-//   if (payload.developers?.length) {
-//     await Promise.all(
-//       payload.developers.map((developer) =>
-//         assertUserExists(
-//           developer.toString(),
-//           "Developer ID",
-//         ),
-//       ),
-//     );
-//   }
-
-//   if (payload.priority !== undefined) {
-//     const currentProject = await Project.findById(projectId).select("priority");
-//     if (currentProject?.priority !== payload.priority) {
-//       await reorderPriority(payload.priority, currentProject?.priority, projectId);
-//     }
-//   }
-
-//   const {
-//     isDeleted,
-//     deletedAt,
-//     deletedBy,
-//     ...safePayload
-//   } = payload;
-
-//   const updatedProject =
-//     await Project.findOneAndUpdate(
-//       {
-//         _id: projectId,
-//         isDeleted: false,
-//       },
-//       safePayload,
-//       {
-//         new: true,
-//         runValidators: true,
-//       },
-//     ).populate(populateOptions);
-
-//   if (!updatedProject) {
-//     throw new AppError(
-//       httpStatus.NOT_FOUND,
-//       "Project not found.",
-//     );
-//   }
-
-//   return {
-//     data: updatedProject,
-//   };
-// };
-
 
 const updateProject = async (
   projectId: string,
@@ -997,45 +917,135 @@ const updateProject = async (
 /**
  * Soft Delete / Move To Trash
  */
+// const softDeleteProject = async (
+//   projectId: string,
+//   decodedToken: JwtPayload,
+// ) => {
+//   await assertProjectExists(projectId);
+
+//   const updatedProject =
+//     await Project.findOneAndUpdate(
+//       {
+//         _id: projectId,
+//         isDeleted: false,
+//       },
+//       {
+//         isDeleted: true,
+//         isActive: false,
+//         deletedAt: new Date(),
+//         deletedBy: toObjectId(decodedToken.userId),
+//       },
+//       {
+//         new: true,
+//         runValidators: true,
+//       },
+//     ).populate(populateOptions);
+
+//   if (!updatedProject) {
+//     throw new AppError(
+//       httpStatus.NOT_FOUND,
+//       "Project not found.",
+//     );
+//   }
+
+//   return {
+//     data: updatedProject,
+//   };
+// };
+
 const softDeleteProject = async (
   projectId: string,
   decodedToken: JwtPayload,
 ) => {
-  await assertProjectExists(projectId);
+  const project = await assertProjectExists(projectId);
 
-  const updatedProject =
-    await Project.findOneAndUpdate(
-      {
-        _id: projectId,
-        isDeleted: false,
-      },
-      {
-        isDeleted: true,
-        isActive: false,
-        deletedAt: new Date(),
-        deletedBy: toObjectId(decodedToken.userId),
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
+  const session = await mongoose.startSession();
+
+  try {
+    let updatedProject;
+
+    await session.withTransaction(async () => {
+      // COMPLETE payment এর টাকা account থেকে ফেরত
+      await applyBalanceDiff(project.payments ?? [], [], session);
+
+      updatedProject = await Project.findOneAndUpdate(
+        {
+          _id: projectId,
+          isDeleted: false,
+        },
+        {
+          isDeleted: true,
+          isActive: false,
+          balanceReversed: true,
+          deletedAt: new Date(),
+          deletedBy: toObjectId(decodedToken.userId),
+        },
+        {
+          new: true,
+          runValidators: true,
+          session,
+        },
+      );
+
+      if (!updatedProject) {
+        throw new AppError(
+          httpStatus.NOT_FOUND,
+          "Project not found.",
+        );
+      }
+    });
+
+    const populatedProject = await Project.findById(
+      updatedProject!._id,
     ).populate(populateOptions);
 
-  if (!updatedProject) {
-    throw new AppError(
-      httpStatus.NOT_FOUND,
-      "Project not found.",
-    );
+    return {
+      data: populatedProject,
+    };
+  } finally {
+    await session.endSession();
   }
-
-  return {
-    data: updatedProject,
-  };
 };
-
 /**
  * Restore Project
  */
+// const restoreProject = async (
+//   projectId: string,
+// ) => {
+//   assertValidObjectId(projectId, "Project ID");
+
+//   const project = await Project.findOne({
+//     _id: projectId,
+//     isDeleted: true,
+//   });
+
+//   if (!project) {
+//     throw new AppError(
+//       httpStatus.NOT_FOUND,
+//       "Deleted project not found.",
+//     );
+//   }
+
+//   const updatedProject =
+//     await Project.findByIdAndUpdate(
+//       projectId,
+//       {
+//         isDeleted: false,
+//         isActive: true,
+//         deletedAt: null,
+//         deletedBy: null,
+//       },
+//       {
+//         new: true,
+//         runValidators: true,
+//       },
+//     ).populate(populateOptions);
+
+//   return {
+//     data: updatedProject,
+//   };
+// };
+
 const restoreProject = async (
   projectId: string,
 ) => {
@@ -1053,24 +1063,44 @@ const restoreProject = async (
     );
   }
 
-  const updatedProject =
-    await Project.findByIdAndUpdate(
-      projectId,
-      {
-        isDeleted: false,
-        isActive: true,
-        deletedAt: null,
-        deletedBy: null,
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
+  const session = await mongoose.startSession();
+
+  try {
+    let updatedProject;
+
+    await session.withTransaction(async () => {
+      // শুধু delete এ reverse হয়ে থাকলেই আবার apply হবে
+      if (project.balanceReversed) {
+        await applyBalanceDiff([], project.payments ?? [], session);
+      }
+
+      updatedProject = await Project.findByIdAndUpdate(
+        projectId,
+        {
+          isDeleted: false,
+          isActive: true,
+          balanceReversed: false,
+          deletedAt: null,
+          deletedBy: null,
+        },
+        {
+          new: true,
+          runValidators: true,
+          session,
+        },
+      );
+    });
+
+    const populatedProject = await Project.findById(
+      updatedProject!._id,
     ).populate(populateOptions);
 
-  return {
-    data: updatedProject,
-  };
+    return {
+      data: populatedProject,
+    };
+  } finally {
+    await session.endSession();
+  }
 };
 
 /**

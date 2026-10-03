@@ -61,6 +61,24 @@ const getFinancialAccountSummary = catchAsync(async (req, res) => {
   });
 });
 
+const getAllPayments = catchAsync(async (req, res) => {
+  const { result, meta, summary, byAccount } =
+    await FinancialAccountService.getAllPayments(
+      req.query as Record<string, string>,
+    );
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: "Financial payments retrieved successfully",
+    meta,
+    data: {
+      payments: result,
+      summary,
+      byAccount,
+    },
+  });
+});
 
 const updateFinancialAccount = catchAsync(async (req, res) => {
       const { id } = req.params;
@@ -108,4 +126,5 @@ export const FinancialAccountController = {
    getFinancialAccountSummary,
   updateFinancialAccount,
   deleteFinancialAccount,
+  getAllPayments,
 };

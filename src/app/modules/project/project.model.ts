@@ -217,6 +217,10 @@ const projectSchema = new Schema<IProject>(
             ref: "User",
             default: null,
         },
+        balanceReversed: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,

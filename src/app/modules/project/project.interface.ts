@@ -100,6 +100,7 @@ export interface IProject {
     deletedAt?: Date;
     deletedBy?: Types.ObjectId;
     isActive?: boolean;
+    balanceReversed?: boolean;
 
     createdAt?: Date;
     updatedAt?: Date;
