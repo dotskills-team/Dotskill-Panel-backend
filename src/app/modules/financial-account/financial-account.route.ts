@@ -21,6 +21,13 @@ router.get(
   checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER),
   FinancialAccountController.getFinancialAccountSummary,
 );
+
+router.get(
+  "/payments",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN),
+  FinancialAccountController.getAllPayments,
+);
+
 router.get("/", checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER), FinancialAccountController.getAllFinancialAccounts);
 
 router.get(
