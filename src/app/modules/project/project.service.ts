@@ -89,25 +89,97 @@ const assertProjectExists = async (
   return project;
 };
 
+// const validatePayments = async (
+//   payments: IPayment[] = [],
+// ) => {
+//   console.log("VALIDATING PAYMENTS:", JSON.stringify(payments, null, 2));
+
+//   for (const payment of payments) {
+//     if (
+//       payment.status === PaymentStatus.COMPLETE &&
+//       !payment.financialAccountId
+//     ) {
+//       throw new AppError(
+//         httpStatus.BAD_REQUEST,
+//         "Financial account is required for completed payment.",
+//       );
+//     }
+
+//     if (payment.financialAccountId) {
+//       assertValidObjectId(
+//         payment.financialAccountId.toString(),
+//         "Financial Account ID",
+//       );
+
+//       const account = await FinancialAccount.findOne({
+//         _id: payment.financialAccountId,
+//         isDeleted: false,
+//         status: "ACTIVE",
+//       });
+
+//       if (!account) {
+//         throw new AppError(
+//           httpStatus.BAD_REQUEST,
+//           "Financial account does not exist or is inactive.",
+//         );
+//       }
+//     }
+//   }
+// };
+
 const validatePayments = async (
   payments: IPayment[] = [],
+  existingPayments: IPayment[] = [],
 ) => {
   console.log("VALIDATING PAYMENTS:", JSON.stringify(payments, null, 2));
 
+  // existing COMPLETE payments যেগুলোর financialAccountId নেই
+  // amount + date + status দিয়ে match করব (কারণ frontend _id পাঠায় না)
+  const legacyCompleteKeys = new Set(
+    (existingPayments ?? [])
+      .filter(
+        (p) =>
+          p.status === PaymentStatus.COMPLETE &&
+          !p.financialAccountId,
+      )
+      .map((p) => {
+        const d = p.date instanceof Date ? p.date.toISOString().slice(0, 10) : String(p.date).slice(0, 10);
+        return `${Number(p.amount)}|${d}|${p.status}`;
+      }),
+  );
+
   for (const payment of payments) {
+    const hasAccount =
+      payment.financialAccountId &&
+      String(payment.financialAccountId).trim() !== "";
+
+    const dateStr =
+      payment.date instanceof Date
+        ? payment.date.toISOString().slice(0, 10)
+        : String(payment.date).slice(0, 10);
+
+    const key = `${Number(payment.amount)}|${dateStr}|${payment.status}`;
+
+    // পুরনো COMPLETE payment (account ছাড়া) — skip
     if (
       payment.status === PaymentStatus.COMPLETE &&
-      !payment.financialAccountId
+      !hasAccount &&
+      legacyCompleteKeys.has(key)
     ) {
+      continue;
+    }
+
+    // নতুন COMPLETE payment-এ account বাধ্যতামূলক
+    if (payment.status === PaymentStatus.COMPLETE && !hasAccount) {
       throw new AppError(
         httpStatus.BAD_REQUEST,
         "Financial account is required for completed payment.",
       );
     }
 
-    if (payment.financialAccountId) {
+    if (hasAccount) {
       assertValidObjectId(
-        payment.financialAccountId.toString(),
+        payment.financialAccountId!.toString(),
         "Financial Account ID",
       );
 
@@ -158,6 +230,25 @@ const sanitizeQuery = (
   delete sanitized["createdAt[lte]"];
 
   return sanitized;
+};
+
+const sanitizePayments = (payments?: IPayment[]): IPayment[] | undefined => {
+  if (!payments) return payments;
+
+  return payments.map((p) => {
+    const accountId = p.financialAccountId;
+
+    // empty string / null / undefined → null
+    const cleanAccountId =
+      accountId && String(accountId).trim() !== ""
+        ? accountId
+        : null;
+
+    return {
+      ...p,
+      financialAccountId: cleanAccountId as any,
+    };
+  });
 };
 
 // Project document er kon field er upor date filter cholbe
@@ -479,15 +570,15 @@ const createProject = async (
         );
       }
 
-      // Create project
+      const sanitizedPayload = {
+        ...payload,
+        payments: sanitizePayments(payload.payments),
+        isDeleted: false,
+        isActive: true,
+      };
+
       const [project] = await Project.create(
-        [
-          {
-            ...payload,
-            isDeleted: false,
-            isActive: true,
-          },
-        ],
+        [sanitizedPayload],
         { session },
       );
 
@@ -827,9 +918,15 @@ const updateProject = async (
     );
   }
 
+  // if (payload.payments !== undefined) {
+  //   await validatePayments(
+  //     payload.payments as IPayment[],
+  //   );
+  // }
   if (payload.payments !== undefined) {
     await validatePayments(
       payload.payments as IPayment[],
+      existingProject.payments ?? [],
     );
   }
 
@@ -838,12 +935,27 @@ const updateProject = async (
       ? await Project.findById(projectId).select("priority")
       : null;
 
+  // const {
+  //   isDeleted,
+  //   deletedAt,
+  //   deletedBy,
+  //   ...safePayload
+  // } = payload;
+
   const {
     isDeleted,
     deletedAt,
     deletedBy,
     ...safePayload
   } = payload;
+
+  // payments sanitize
+  if (safePayload.payments !== undefined) {
+    safePayload.payments = sanitizePayments(
+      safePayload.payments as IPayment[],
+    );
+  }
+
 
   // -----------------------------
   // Transaction
@@ -965,7 +1077,6 @@ const softDeleteProject = async (
     let updatedProject;
 
     await session.withTransaction(async () => {
-      // COMPLETE payment এর টাকা account থেকে ফেরত
       await applyBalanceDiff(project.payments ?? [], [], session);
 
       updatedProject = await Project.findOneAndUpdate(
@@ -1006,45 +1117,6 @@ const softDeleteProject = async (
     await session.endSession();
   }
 };
-/**
- * Restore Project
- */
-// const restoreProject = async (
-//   projectId: string,
-// ) => {
-//   assertValidObjectId(projectId, "Project ID");
-
-//   const project = await Project.findOne({
-//     _id: projectId,
-//     isDeleted: true,
-//   });
-
-//   if (!project) {
-//     throw new AppError(
-//       httpStatus.NOT_FOUND,
-//       "Deleted project not found.",
-//     );
-//   }
-
-//   const updatedProject =
-//     await Project.findByIdAndUpdate(
-//       projectId,
-//       {
-//         isDeleted: false,
-//         isActive: true,
-//         deletedAt: null,
-//         deletedBy: null,
-//       },
-//       {
-//         new: true,
-//         runValidators: true,
-//       },
-//     ).populate(populateOptions);
-
-//   return {
-//     data: updatedProject,
-//   };
-// };
 
 const restoreProject = async (
   projectId: string,
@@ -1069,7 +1141,6 @@ const restoreProject = async (
     let updatedProject;
 
     await session.withTransaction(async () => {
-      // শুধু delete এ reverse হয়ে থাকলেই আবার apply হবে
       if (project.balanceReversed) {
         await applyBalanceDiff([], project.payments ?? [], session);
       }
