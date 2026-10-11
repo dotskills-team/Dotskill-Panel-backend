@@ -7,6 +7,10 @@ import { FundTransfer } from "./fund-transfer.model";
 import { IFundTransfer } from "./fund-transfer.interface";
 import { FUND_TRANSFER_SEARCHABLE_FIELDS } from "./fund-transfer.constant";
 
+import { applyAccountChange } from "../transaction/ledger.service";
+import { TRANSACTION_TYPE } from "../transaction/transaction.constant";
+
+
 const populateOptions = [
   { path: "fromAccountId", select: "accountName accountType currentBalance" },
   { path: "toAccountId", select: "accountName accountType currentBalance" },
@@ -68,16 +72,39 @@ const createFundTransfer = async (
       { session },
     );
 
-    await FinancialAccount.findByIdAndUpdate(
-      fromId,
-      { $inc: { currentBalance: -amount } },
-      { session },
-    );
-    await FinancialAccount.findByIdAndUpdate(
-      toId,
-      { $inc: { currentBalance: amount } },
-      { session },
-    );
+    // await FinancialAccount.findByIdAndUpdate(
+    //   fromId,
+    //   { $inc: { currentBalance: -amount } },
+    //   { session },
+    // );
+    // await FinancialAccount.findByIdAndUpdate(
+    //   toId,
+    //   { $inc: { currentBalance: amount } },
+    //   { session },
+    // );
+        const common = {
+      session,
+      userId: decodedToken.userId,
+      date: payload.transferDate,
+      note: payload.note,
+      refModel: "FundTransfer",
+      refId: transfer._id,
+    };
+
+    await applyAccountChange({
+      ...common,
+      accountId: fromId,
+      amount: -amount,
+      type: TRANSACTION_TYPE.TRANSFER_OUT,
+      requireActive: true,
+    });
+    await applyAccountChange({
+      ...common,
+      accountId: toId,
+      amount,
+      type: TRANSACTION_TYPE.TRANSFER_IN,
+      requireActive: true,
+    });
 
     await session.commitTransaction();
 

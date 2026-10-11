@@ -12,7 +12,8 @@ import { Client } from "../clients/client.model";
 import { Role } from "../user/user.interface";
 import mongoose, { Types, ClientSession } from "mongoose";
 import { FinancialAccount } from "../financial-account/financial-account.model";
-
+import { applyAccountChange } from "../transaction/ledger.service";
+import { TRANSACTION_TYPE } from "../transaction/transaction.constant";
 const toObjectId = (id: string) => new Types.ObjectId(id);
 
 const assertValidObjectId = (
@@ -585,11 +586,9 @@ const createProject = async (
       createdProject = project;
 
       // Update financial account balance
-      await applyBalanceDiff(
-        [],
-        project.payments ?? [],
-        session,
-      );
+      await applyBalanceDiff([], project.payments ?? [], session, {
+        projectId: project._id,
+      });
     });
 
 
@@ -738,10 +737,56 @@ const sumCompletedByAccount = (
   return map;
 };
 
+// const applyBalanceDiff = async (
+//   oldPayments: IPayment[] = [],
+//   newPayments?: IPayment[],
+//   session?: ClientSession,
+// ) => {
+//   if (!newPayments) return;
+
+//   const oldSums = sumCompletedByAccount(oldPayments);
+//   const newSums = sumCompletedByAccount(newPayments);
+//   const allAccountIds = new Set([...oldSums.keys(), ...newSums.keys()]);
+
+//   for (const accountId of allAccountIds) {
+//     const diff = (newSums.get(accountId) ?? 0) - (oldSums.get(accountId) ?? 0);
+//     if (diff === 0) continue;
+
+//     const result = await FinancialAccount.findOneAndUpdate(
+//       {
+//         _id: accountId,
+//         isDeleted: false,
+//         // টাকা ফেরত নিতে হলে account-এ যথেষ্ট balance থাকতে হবে
+//         ...(diff < 0 ? { currentBalance: { $gte: -diff } } : {}),
+//       },
+//       { $inc: { currentBalance: diff } },
+//       { session, new: true },
+//     );
+
+//     // if (!result) {
+//     //   throw new AppError(
+//     //     httpStatus.BAD_REQUEST,
+//     //     diff < 0
+//     //       ? "Cannot reduce this payment: the account does not have enough balance to reverse it."
+//     //       : "Financial account not found.",
+//     //   );
+//     // }
+
+//     if (!result) {
+//       throw new AppError(
+//         httpStatus.BAD_REQUEST,
+//         diff < 0
+//           ? "Account does not have enough balance to reverse these payments."
+//           : "Financial account not found.",
+//       );
+//     }
+//   }
+// };
 const applyBalanceDiff = async (
   oldPayments: IPayment[] = [],
-  newPayments?: IPayment[],
-  session?: ClientSession,
+  newPayments: IPayment[] | undefined,
+  session: ClientSession,
+  ctx: { projectId?: Types.ObjectId | string; userId?: string; note?: string } = {},
 ) => {
   if (!newPayments) return;
 
@@ -753,37 +798,19 @@ const applyBalanceDiff = async (
     const diff = (newSums.get(accountId) ?? 0) - (oldSums.get(accountId) ?? 0);
     if (diff === 0) continue;
 
-    const result = await FinancialAccount.findOneAndUpdate(
-      {
-        _id: accountId,
-        isDeleted: false,
-        // টাকা ফেরত নিতে হলে account-এ যথেষ্ট balance থাকতে হবে
-        ...(diff < 0 ? { currentBalance: { $gte: -diff } } : {}),
-      },
-      { $inc: { currentBalance: diff } },
-      { session, new: true },
-    );
-
-    // if (!result) {
-    //   throw new AppError(
-    //     httpStatus.BAD_REQUEST,
-    //     diff < 0
-    //       ? "Cannot reduce this payment: the account does not have enough balance to reverse it."
-    //       : "Financial account not found.",
-    //   );
-    // }
-
-    if (!result) {
-      throw new AppError(
-        httpStatus.BAD_REQUEST,
-        diff < 0
-          ? "Account does not have enough balance to reverse these payments."
-          : "Financial account not found.",
-      );
-    }
+    await applyAccountChange({
+      accountId,
+      amount: diff,
+      type: TRANSACTION_TYPE.PROJECT_PAYMENT,
+      isReversal: diff < 0,
+      note: ctx.note ?? (diff > 0 ? "Project payment received" : "Project payment reduced"),
+      refModel: "Project",
+      refId: ctx.projectId,
+      userId: ctx.userId,
+      session,
+    });
   }
 };
-
 /**
  * Get All Active Projects
  */
@@ -1004,10 +1031,16 @@ const updateProject = async (
 
       // Update financial account balance
       if (payload.payments !== undefined) {
+        // await applyBalanceDiff(
+        //   existingProject.payments ?? [],
+        //   updatedProject.payments ?? [],
+        //   session,
+        // );
         await applyBalanceDiff(
           existingProject.payments ?? [],
           updatedProject.payments ?? [],
           session,
+          { projectId },
         );
       }
     });
@@ -1077,7 +1110,12 @@ const softDeleteProject = async (
     let updatedProject;
 
     await session.withTransaction(async () => {
-      await applyBalanceDiff(project.payments ?? [], [], session);
+      // await applyBalanceDiff(project.payments ?? [], [], session);
+      await applyBalanceDiff(project.payments ?? [], [], session, {
+        projectId,
+        userId: decodedToken.userId,
+        note: "Project moved to trash",
+      });
 
       updatedProject = await Project.findOneAndUpdate(
         {
@@ -1142,7 +1180,11 @@ const restoreProject = async (
 
     await session.withTransaction(async () => {
       if (project.balanceReversed) {
-        await applyBalanceDiff([], project.payments ?? [], session);
+        // await applyBalanceDiff([], project.payments ?? [], session);
+        await applyBalanceDiff([], project.payments ?? [], session, {
+          projectId,
+          note: "Project restored",
+        });
       }
 
       updatedProject = await Project.findByIdAndUpdate(

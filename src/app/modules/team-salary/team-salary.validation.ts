@@ -68,7 +68,7 @@ export const generateMonthlySalarySchema = z.object({
 
 export const createSalaryPaymentSchema = z.object({
   amount: positiveAmountSchema,
-
+  financialAccountId: objectIdSchema,
   paymentMethod: z.enum(
     Object.values(PaymentMethod) as [
       PaymentMethod,

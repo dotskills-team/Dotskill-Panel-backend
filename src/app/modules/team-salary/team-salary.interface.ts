@@ -8,7 +8,7 @@ export interface ISalaryPayment {
   amount: number;
 
   paymentMethod: PaymentMethod;
-
+  financialAccountId?: Types.ObjectId;
   paymentDate: Date;
 
   paymentReference?: string;

@@ -6,7 +6,7 @@ import { IFinancialAccount } from "./financial-account.interface";
 import { FINANCIAL_ACCOUNT_SEARCHABLE_FIELDS } from "./financial-account.constant";
 import { User } from "../user/user.model";
 import { Project } from "../project/project.model";
-
+import { Loan } from "../loan/loan.model";
 // const createFinancialAccount = async (
 //   payload: Partial<IFinancialAccount>,
 //   userId: string,
@@ -103,14 +103,17 @@ const ownerMap = new Map<
     existing.totalBalance += acc.currentBalance;
     ownerMap.set(key, existing);
   }
-
+  const [loanAgg] = await Loan.aggregate([
+    { $group: { _id: null, totalDue: { $sum: "$dueAmount" } } },
+  ]);
   return {
     totalAccounts: accounts.length,
     totalOpeningBalance,
     totalCurrentBalance,
     totalSpent: totalOpeningBalance - totalCurrentBalance,
+    totalLoanDue: loanAgg?.totalDue ?? 0,
     byOwner: Array.from(ownerMap.values()),
-    accounts: accounts.map((acc) => ({
+    accounts: accounts.map((acc) => ({ 
       _id: acc._id,
       accountName: acc.accountName,
       accountType: acc.accountType,

@@ -19,6 +19,13 @@ import { Role, PaymentMethod, UserStatus } from "../user/user.interface";
 import AppError from "../../errorHelpers/appError";
 import { QueryBuilder } from "../../utils/QueryBuilder";
 
+
+import mongoose from "mongoose";
+import { FinancialAccount } from "../financial-account/financial-account.model";
+import { ACCOUNT_STATUS } from "../financial-account/financial-account.constant";
+
+import { applyAccountChange } from "../transaction/ledger.service";
+import { TRANSACTION_TYPE } from "../transaction/transaction.constant";
 const assertValidObjectId = (id: string) => {
   if (!Types.ObjectId.isValid(id)) {
     throw new AppError(httpStatus.BAD_REQUEST, "Invalid object ID.");
@@ -377,115 +384,264 @@ const getUserSalaryHistory = async (
   };
 };
 
+// const createSalaryPayment = async (
+//   salaryId: string,
+//   payload: CreateSalaryPaymentInput,
+//   decodedToken: JwtPayload,
+// ) => {
+//   assertValidObjectId(salaryId);
+
+//   const salary = await TeamSalary.findById(salaryId);
+
+//   if (!salary) {
+//     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
+//   }
+
+//   if (salary.status === SalaryPaymentStatus.PAID) {
+//     throw new AppError(
+//       httpStatus.BAD_REQUEST,
+//       "This salary has already been fully paid.",
+//     );
+//   }
+
+//   if (salary.status === SalaryPaymentStatus.CANCELLED) {
+//     throw new AppError(
+//       httpStatus.BAD_REQUEST,
+//       "Cancelled salary cannot receive payments.",
+//     );
+//   }
+
+//   const amount = Number(payload.amount);
+
+//   if (amount <= 0) {
+//     throw new AppError(
+//       httpStatus.BAD_REQUEST,
+//       "Payment amount must be greater than zero.",
+//     );
+//   }
+
+//   const currentDue = Number(salary.dueAmount);
+
+//   /**
+//    * Never allow overpayment.
+//    */
+//   if (amount > currentDue) {
+//     throw new AppError(
+//       httpStatus.BAD_REQUEST,
+//       `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
+//     );
+//   }
+
+//   const newPaidAmount = Number(salary.paidAmount) + amount;
+
+//   const newDueAmount = Number(salary.salaryAmount) - newPaidAmount;
+
+//   const newStatus = getSalaryStatus(Number(salary.salaryAmount), newPaidAmount);
+
+//   salary.paidAmount = newPaidAmount;
+//   salary.dueAmount = Math.max(newDueAmount, 0);
+//   salary.status = newStatus;
+
+//   salary.payments.push({
+//     amount,
+
+//     paymentMethod: payload.paymentMethod as PaymentMethod,
+
+//     paymentDate: new Date(payload.paymentDate),
+
+//     paymentReference: payload.paymentReference,
+
+//     note: payload.note,
+
+//     recordedBy: decodedToken.userId
+//       ? toObjectId(decodedToken.userId)
+//       : undefined,
+//   });
+
+//   salary.updatedBy = toObjectId(decodedToken.userId);
+
+//   await salary.save();
+
+//   const populatedSalary = await TeamSalary.findById(salary._id)
+//     .populate(
+//       "user",
+//       "firstName lastName email phone role designation department salary paymentMethod avatar",
+//     )
+//     .populate("cancelledBy", "firstName lastName email designation");
+
+//   return {
+//     data: populatedSalary,
+//   };
+// };
 const createSalaryPayment = async (
   salaryId: string,
   payload: CreateSalaryPaymentInput,
   decodedToken: JwtPayload,
 ) => {
   assertValidObjectId(salaryId);
-
-  const salary = await TeamSalary.findById(salaryId);
-
-  if (!salary) {
-    throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
-  }
-
-  if (salary.status === SalaryPaymentStatus.PAID) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "This salary has already been fully paid.",
-    );
-  }
-
-  if (salary.status === SalaryPaymentStatus.CANCELLED) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Cancelled salary cannot receive payments.",
-    );
-  }
+  assertValidObjectId(payload.financialAccountId);
 
   const amount = Number(payload.amount);
+  const session = await mongoose.startSession();
 
-  if (amount <= 0) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Payment amount must be greater than zero.",
-    );
+  try {
+    await session.withTransaction(async () => {
+      const salary = await TeamSalary.findById(salaryId).session(session);
+
+      if (!salary) {
+        throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
+      }
+      if (salary.status === SalaryPaymentStatus.PAID) {
+        throw new AppError(httpStatus.BAD_REQUEST, "This salary has already been fully paid.");
+      }
+      if (salary.status === SalaryPaymentStatus.CANCELLED) {
+        throw new AppError(httpStatus.BAD_REQUEST, "Cancelled salary cannot receive payments.");
+      }
+
+      const currentDue = Number(salary.dueAmount);
+      if (amount > currentDue) {
+        throw new AppError(
+          httpStatus.BAD_REQUEST,
+          `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
+        );
+      }
+
+      // account থেকে টাকা কাটা (ব্যালেন্স থাকলে তবেই কাটবে)
+      // const account = await FinancialAccount.findOneAndUpdate(
+      //   {
+      //     _id: payload.financialAccountId,
+      //     isDeleted: false,
+      //     status: ACCOUNT_STATUS.ACTIVE,
+      //     currentBalance: { $gte: amount },
+      //   },
+      //   {
+      //     $inc: { currentBalance: -amount },
+      //     updatedBy: toObjectId(decodedToken.userId),
+      //   },
+      //   { new: true, session },
+      // );
+      const account = await applyAccountChange({
+        accountId: payload.financialAccountId,
+        amount: -amount,
+        type: TRANSACTION_TYPE.SALARY,
+        date: payload.paymentDate,
+        note: payload.note || "Salary payment",
+        refModel: "TeamSalary",
+        refId: salary._id,
+        userId: decodedToken.userId,
+        session,
+        requireActive: true,
+      });
+      if (!account) {
+        const exists = await FinancialAccount.findOne({
+          _id: payload.financialAccountId,
+          isDeleted: false,
+        }).session(session);
+
+        throw new AppError(
+          exists ? httpStatus.BAD_REQUEST : httpStatus.NOT_FOUND,
+          exists
+            ? "Account-এ পর্যাপ্ত ব্যালেন্স নেই (অথবা account inactive)।"
+            : "Financial account not found.",
+        );
+      }
+
+      const newPaidAmount = Number(salary.paidAmount) + amount;
+
+      salary.paidAmount = newPaidAmount;
+      salary.dueAmount = Math.max(Number(salary.salaryAmount) - newPaidAmount, 0);
+      salary.status = getSalaryStatus(Number(salary.salaryAmount), newPaidAmount);
+
+      salary.payments.push({
+        amount,
+        financialAccountId: account._id,
+        paymentMethod: payload.paymentMethod as PaymentMethod,
+        paymentDate: new Date(payload.paymentDate),
+        paymentReference: payload.paymentReference,
+        note: payload.note,
+        recordedBy: toObjectId(decodedToken.userId),
+      });
+
+      salary.updatedBy = toObjectId(decodedToken.userId);
+
+      await salary.save({ session });
+    });
+  } finally {
+    await session.endSession();
   }
 
-  const currentDue = Number(salary.dueAmount);
-
-  /**
-   * Never allow overpayment.
-   */
-  if (amount > currentDue) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
-    );
-  }
-
-  const newPaidAmount = Number(salary.paidAmount) + amount;
-
-  const newDueAmount = Number(salary.salaryAmount) - newPaidAmount;
-
-  const newStatus = getSalaryStatus(Number(salary.salaryAmount), newPaidAmount);
-
-  salary.paidAmount = newPaidAmount;
-  salary.dueAmount = Math.max(newDueAmount, 0);
-  salary.status = newStatus;
-
-  salary.payments.push({
-    amount,
-
-    paymentMethod: payload.paymentMethod as PaymentMethod,
-
-    paymentDate: new Date(payload.paymentDate),
-
-    paymentReference: payload.paymentReference,
-
-    note: payload.note,
-
-    recordedBy: decodedToken.userId
-      ? toObjectId(decodedToken.userId)
-      : undefined,
-  });
-
-  salary.updatedBy = toObjectId(decodedToken.userId);
-
-  await salary.save();
-
-  const populatedSalary = await TeamSalary.findById(salary._id)
+  const populatedSalary = await TeamSalary.findById(salaryId)
     .populate(
       "user",
       "firstName lastName email phone role designation department salary paymentMethod avatar",
     )
     .populate("cancelledBy", "firstName lastName email designation");
 
-  return {
-    data: populatedSalary,
-  };
+  return { data: populatedSalary };
 };
+// const deleteTeamSalary = async (id: string) => {
+//   const salary = await TeamSalary.findById(id);
 
+//   if (!salary) {
+//     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found");
+//   }
+
+//   // if (salary.payments && salary.payments.length > 0) {
+//   //   throw new AppError(
+//   //     httpStatus.BAD_REQUEST,
+//   //     "A salary record with recorded payments cannot be deleted. Cancel it instead.",
+//   //   );
+//   // }
+
+//   await TeamSalary.findByIdAndDelete(id);
+
+//   return null;
+// };
 const deleteTeamSalary = async (id: string) => {
-  const salary = await TeamSalary.findById(id);
+  assertValidObjectId(id);
 
-  if (!salary) {
-    throw new AppError(httpStatus.NOT_FOUND, "Salary record not found");
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      const salary = await TeamSalary.findById(id).session(session);
+
+      if (!salary) {
+        throw new AppError(httpStatus.NOT_FOUND, "Salary record not found");
+      }
+
+      // for (const payment of salary.payments) {
+      //   if (payment.financialAccountId) {
+      //     await FinancialAccount.findByIdAndUpdate(
+      //       payment.financialAccountId,
+      //       { $inc: { currentBalance: payment.amount } },
+      //       { session },
+      //     );
+      //   }
+      // }
+            for (const payment of salary.payments) {
+        if (payment.financialAccountId) {
+          await applyAccountChange({
+            accountId: payment.financialAccountId,
+            amount: payment.amount,
+            type: TRANSACTION_TYPE.SALARY,
+            isReversal: true,
+            note: "Salary record deleted",
+            refModel: "TeamSalary",
+            refId: salary._id,
+            session,
+          });
+        }
+      }
+
+      await TeamSalary.findByIdAndDelete(id, { session });
+    });
+  } finally {
+    await session.endSession();
   }
-
-  // if (salary.payments && salary.payments.length > 0) {
-  //   throw new AppError(
-  //     httpStatus.BAD_REQUEST,
-  //     "A salary record with recorded payments cannot be deleted. Cancel it instead.",
-  //   );
-  // }
-
-  await TeamSalary.findByIdAndDelete(id);
 
   return null;
 };
-
 const cancelTeamSalary = async (
   salaryId: string,
   reason: string,

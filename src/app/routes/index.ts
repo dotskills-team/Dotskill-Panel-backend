@@ -9,7 +9,8 @@ import { FinancialAccountRoutes } from "../modules/financial-account/financial-a
 import { ExpenseCategoryRoutes } from "../modules/expense-category/expense-category.route";
 import { ExpenseRoutes } from "../modules/expense/expense.route";
 import { FundTransferRoutes } from "../modules/fund-transfer/fund-transfer.route";
-
+import { TransactionRoutes } from "../modules/transaction/transaction.route";
+import { LoanRoutes } from "../modules/loan/loan.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -41,7 +42,8 @@ const moduleRoutes = [
 { path: "/expense-categories", route: ExpenseCategoryRoutes },
 { path: "/expenses", route: ExpenseRoutes },
 { path: "/fund-transfers", route: FundTransferRoutes },
- 
+   { path: "/transactions", route: TransactionRoutes },
+  { path: "/loans", route: LoanRoutes },
 ];
 
 moduleRoutes.forEach((route) => {

@@ -13,7 +13,10 @@ const salaryPaymentSchema = new Schema<ISalaryPayment>(
       required: true,
       min: [0, "Payment amount cannot be negative."],
     },
-
+    financialAccountId: {
+      type: Schema.Types.ObjectId,
+      ref: "FinancialAccount",
+    },
     paymentMethod: {
       type: String,
       enum: Object.values(PaymentMethod),
