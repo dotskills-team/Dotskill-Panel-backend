@@ -278,11 +278,6 @@ const getDayBoundariesUTC = (dateStr: string) => {
   return { start, end };
 };
 
-// Rules:
-// - startDate + endDate  -> duita din er moddhe (inclusive range)
-// - shudhu startDate     -> shudhu oi ek din
-// - shudhu endDate       -> shudhu oi ek din
-// - kono tai na          -> filter nai
 const buildDateRangeFilter = (
   startDateStr?: string,
   endDateStr?: string,
@@ -304,9 +299,6 @@ const buildDateRangeFilter = (
   return null;
 };
 
-// Query theke startDate/endDate ber kore Mongo filter banay, ar query theke
-// oi key gulo delete kore dey jate QueryBuilder eta ke normal field filter
-// hishebe na dhore.
 const buildDateFilter = (query: Record<string, string>) => {
   const startDateStr = query["startDate"];
   const endDateStr = query["endDate"];
@@ -340,65 +332,6 @@ const shiftPriorities = async (
   }
 };
 
-/**
- * Reorders priorities when a project's priority changes.
- *
- * - Create (oldPriority undefined): every project with priority >= newPriority
- *   shifts DOWN in rank (+1), making room at newPriority.
- * - Update, newPriority < oldPriority (e.g. 5 -> 1): projects in
- *   [newPriority, oldPriority) shift +1.
- * - Update, newPriority > oldPriority (e.g. 1 -> 5): projects in
- *   (oldPriority, newPriority] shift -1.
- *
- * The moved project is parked on a temporary unique value first so it
- * never collides with the projects being shifted.
- */
-// const reorderPriority = async (
-//   newPriority: number,
-//   oldPriority?: number,
-//   excludeProjectId?: string,
-//     session?: ClientSession,
-
-// ) => {
-//   const excludeFilter = excludeProjectId
-//     ? { _id: { $ne: toObjectId(excludeProjectId) } }
-//     : {};
-
-//   // Create case (or the project had no priority): make room at newPriority.
-//   if (oldPriority === undefined) {
-//     await shiftPriorities(
-//       { priority: { $gte: newPriority }, ...excludeFilter },
-//       1,
-//     );
-//     return;
-//   }
-
-//   if (newPriority === oldPriority || !excludeProjectId) return;
-
-//   // Park the moved project on a temporary unique value.
-//   await Project.updateOne(
-//     { _id: excludeProjectId },
-//     { $set: { priority: -Date.now() } },
-//   );
-
-//   if (newPriority < oldPriority) {
-//     await shiftPriorities(
-//       { priority: { $gte: newPriority, $lt: oldPriority }, ...excludeFilter },
-//       1,
-//     );
-//   } else {
-//     await shiftPriorities(
-//       { priority: { $gt: oldPriority, $lte: newPriority }, ...excludeFilter },
-//       -1,
-//     );
-//   }
-
-//   // Put the moved project into its final slot.
-//   await Project.updateOne(
-//     { _id: excludeProjectId },
-//     { $set: { priority: newPriority } },
-//   );
-// };
 const reorderPriority = async (
   newPriority: number,
   oldPriority?: number,
@@ -737,51 +670,6 @@ const sumCompletedByAccount = (
   return map;
 };
 
-// const applyBalanceDiff = async (
-//   oldPayments: IPayment[] = [],
-//   newPayments?: IPayment[],
-//   session?: ClientSession,
-// ) => {
-//   if (!newPayments) return;
-
-//   const oldSums = sumCompletedByAccount(oldPayments);
-//   const newSums = sumCompletedByAccount(newPayments);
-//   const allAccountIds = new Set([...oldSums.keys(), ...newSums.keys()]);
-
-//   for (const accountId of allAccountIds) {
-//     const diff = (newSums.get(accountId) ?? 0) - (oldSums.get(accountId) ?? 0);
-//     if (diff === 0) continue;
-
-//     const result = await FinancialAccount.findOneAndUpdate(
-//       {
-//         _id: accountId,
-//         isDeleted: false,
-//         // টাকা ফেরত নিতে হলে account-এ যথেষ্ট balance থাকতে হবে
-//         ...(diff < 0 ? { currentBalance: { $gte: -diff } } : {}),
-//       },
-//       { $inc: { currentBalance: diff } },
-//       { session, new: true },
-//     );
-
-//     // if (!result) {
-//     //   throw new AppError(
-//     //     httpStatus.BAD_REQUEST,
-//     //     diff < 0
-//     //       ? "Cannot reduce this payment: the account does not have enough balance to reverse it."
-//     //       : "Financial account not found.",
-//     //   );
-//     // }
-
-//     if (!result) {
-//       throw new AppError(
-//         httpStatus.BAD_REQUEST,
-//         diff < 0
-//           ? "Account does not have enough balance to reverse these payments."
-//           : "Financial account not found.",
-//       );
-//     }
-//   }
-// };
 const applyBalanceDiff = async (
   oldPayments: IPayment[] = [],
   newPayments: IPayment[] | undefined,
@@ -811,6 +699,7 @@ const applyBalanceDiff = async (
     });
   }
 };
+
 /**
  * Get All Active Projects
  */
@@ -841,13 +730,22 @@ const getProjects = async (
     .fields()
     .paginate();
 
+  const statsFilter = new QueryBuilder(
+    Project.find(baseFilter),
+    { ...cleanQuery },
+  )
+    .filter()
+    .search(projectSearchableFields)
+    .build()
+    .cast(Project);
+
   const [data, meta, stats] = await Promise.all([
     projectsQuery
       .build()
       .populate(populateOptions),
 
     queryBuilder.getMeta(),
-    getStatusStats(dateFilterObj),
+    getStatusStats(statsFilter),
   ]);
 
   return {
@@ -856,7 +754,6 @@ const getProjects = async (
     stats,
   };
 };
-
 /**
  * Get Deleted Projects
  */
@@ -961,13 +858,6 @@ const updateProject = async (
     payload.priority !== undefined
       ? await Project.findById(projectId).select("priority")
       : null;
-
-  // const {
-  //   isDeleted,
-  //   deletedAt,
-  //   deletedBy,
-  //   ...safePayload
-  // } = payload;
 
   const {
     isDeleted,
