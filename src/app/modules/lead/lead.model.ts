@@ -366,6 +366,7 @@ leadSchema.index({
   contactStatus: 1,
   nextContactAt: 1,
 });
+leadSchema.index({ "notes.createdAt": -1 });
 leadSchema.index({ assignedTo: 1, status: 1 });
 leadSchema.index({ isDeleted: 1, isConverted: 1 });
 leadSchema.index({ createdAt: -1 });

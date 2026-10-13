@@ -597,10 +597,13 @@ const getLeadStats = async (
 
 const getLeads = async (query: Record<string, string>) => {
   const dateFilterObj = buildDateFilter(query);
+  const noteFilterObj = buildNoteFilter(query);
 
   const baseFilter: Record<string, any> = {
     isDeleted: false,
     ...dateFilterObj,
+    ...noteFilterObj, 
+
   };
 
   const queryBuilder = new QueryBuilder(Lead.find(baseFilter), query);
@@ -1041,6 +1044,41 @@ const getFollowUpCalendar = async () => {
   return { data: result };
 };
 
+
+
+// বাংলাদেশ UTC+6 (DST নেই)
+// const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// today = আজকের দিন (ঢাকা), 3d = আজসহ ৩ দিন, 7d = আজসহ ৭ দিন
+const noteWithinDaysMap: Record<string, number> = {
+  today: 0,
+  "3d": 2,
+  "7d": 6,
+};
+
+// ঢাকার "আজকের 00:00" কে UTC Date হিসেবে ফেরত দেয়, daysBack দিন পিছিয়ে
+const getBdDayStartUTC = (daysBack: number) => {
+  const nowBd = new Date(Date.now() + BD_OFFSET_MS);
+  const bdMidnightAsUtcMs = Date.UTC(
+    nowBd.getUTCFullYear(),
+    nowBd.getUTCMonth(),
+    nowBd.getUTCDate(),
+  );
+  return new Date(bdMidnightAsUtcMs - BD_OFFSET_MS - daysBack * DAY_MS);
+};
+
+// query থেকে noteAddedWithin নেবে এবং QueryBuilder-এর জন্য query থেকে মুছে দেবে
+const buildNoteFilter = (query: Record<string, string>) => {
+  const value = query.noteAddedWithin;
+  delete query.noteAddedWithin;
+
+  if (!value || !(value in noteWithinDaysMap)) return {};
+
+  const start = getBdDayStartUTC(noteWithinDaysMap[value]);
+
+  return { notes: { $elemMatch: { createdAt: { $gte: start } } } };
+};
 export const LeadServices = {
   createLead,
   getLeads,
