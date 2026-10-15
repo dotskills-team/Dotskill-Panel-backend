@@ -152,9 +152,150 @@ const getLoanSummary = async () => {
   );
 };
 
+const assertNotRepaid = (loan: { status: string; repaidAmount: number }) => {
+  if (loan.status === "PAID" || loan.repaidAmount > 0) {
+    throw new AppError(
+      400,
+      "This loan has already been repaid (fully or partially) and cannot be edited.",
+    );
+  }
+};
+
+const updateLoan = async (
+  loanId: string,
+  payload: {
+    lenderName?: string;
+    lenderPhone?: string;
+    amount?: number;
+    accountId?: string;
+    receivedDate?: string;
+    dueDate?: string | null;
+    note?: string;
+  },
+  userId: string,
+) => {
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const loan = await Loan.findById(loanId).session(session);
+      if (!loan) throw new AppError(404, "Loan not found");
+      assertNotRepaid(loan);
+
+      const oldAmount = loan.principalAmount;
+      const oldAccountId = loan.receivedAccountId.toString();
+      const newAmount = payload.amount ?? oldAmount;
+      const newAccountId = payload.accountId ?? oldAccountId;
+      const today = new Date().toISOString();
+      const lenderName = payload.lenderName ?? loan.lenderName;
+
+      if (newAccountId !== oldAccountId) {
+        // purono account theke reverse
+        await applyAccountChange({
+          accountId: oldAccountId,
+          amount: -oldAmount,
+          type: TRANSACTION_TYPE.LOAN_REVERSAL,
+          date: today,
+          note: `Loan edit reversal (${lenderName})`,
+          refModel: "Loan",
+          refId: loan._id,
+          loanId: loan._id,
+          userId,
+          session,
+          requireActive: false,
+        });
+        // notun account-e add
+        await applyAccountChange({
+          accountId: newAccountId,
+          amount: newAmount,
+          type: TRANSACTION_TYPE.LOAN_RECEIVED,
+          date: payload.receivedDate ?? loan.receivedDate.toISOString(),
+          note: `Loan from ${lenderName}`,
+          refModel: "Loan",
+          refId: loan._id,
+          loanId: loan._id,
+          userId,
+          session,
+          requireActive: true,
+        });
+      } else if (newAmount !== oldAmount) {
+        // same account, shudhu difference (+ hole barbe, - hole kombe)
+        await applyAccountChange({
+          accountId: oldAccountId,
+          amount: newAmount - oldAmount,
+          type: TRANSACTION_TYPE.LOAN_ADJUSTMENT,
+          date: today,
+          note: `Loan amount adjusted (${oldAmount} → ${newAmount})`,
+          refModel: "Loan",
+          refId: loan._id,
+          loanId: loan._id,
+          userId,
+          session,
+          requireActive: true,
+        });
+      }
+
+      if (payload.lenderName !== undefined) loan.lenderName = payload.lenderName;
+      if (payload.lenderPhone !== undefined) loan.lenderPhone = payload.lenderPhone;
+      if (payload.note !== undefined) loan.note = payload.note;
+      if (payload.receivedDate)
+        loan.receivedDate = new Date(payload.receivedDate);
+      if (payload.dueDate !== undefined)
+        loan.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
+      if (payload.accountId)
+        loan.receivedAccountId = new mongoose.Types.ObjectId(payload.accountId);
+
+      loan.principalAmount = newAmount;
+      loan.dueAmount = newAmount; // repaidAmount == 0 guaranteed
+      loan.status = "ACTIVE";
+      await loan.save({ session });
+    });
+
+    return Loan.findById(loanId).populate(populateOptions);
+  } finally {
+    await session.endSession();
+  }
+};
+
+const deleteLoan = async (loanId: string, userId: string) => {
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const loan = await Loan.findById(loanId).session(session);
+      if (!loan) throw new AppError(404, "Loan not found");
+
+      const hasRepayment = loan.status === "PAID" || loan.repaidAmount > 0;
+
+      // Repay hoy nai (pure ACTIVE) hole account theke taka reverse
+      if (!hasRepayment) {
+        await applyAccountChange({
+          accountId: loan.receivedAccountId.toString(),
+          amount: -loan.principalAmount,
+          type: TRANSACTION_TYPE.LOAN_REVERSAL,
+          date: new Date().toISOString(),
+          note: `Loan deleted (${loan.lenderName})`,
+          refModel: "Loan",
+          refId: loan._id,
+          loanId: loan._id,
+          userId,
+          session,
+          requireActive: false,
+        });
+      }
+
+      await Loan.deleteOne({ _id: loan._id }, { session });
+    });
+
+    return null;
+  } finally {
+    await session.endSession();
+  }
+};
+
 export const LoanService = {
   createLoan,
   repayLoan,
   getAllLoans,
   getLoanSummary,
+  updateLoan,
+  deleteLoan
 };
