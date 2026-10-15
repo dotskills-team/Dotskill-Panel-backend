@@ -18,3 +18,13 @@ export const repayLoanZodSchema = z.object({
   date: z.string().min(1, "Date is required"),
   note: z.string().max(500).optional(),
 });
+
+export const updateLoanZodSchema = z.object({
+  lenderName: z.string().min(1).optional(),
+  lenderPhone: z.string().optional(),
+  amount: z.number().positive().optional(),
+  accountId: z.string().optional(),
+  receivedDate: z.string().optional(),
+  dueDate: z.string().nullable().optional(),
+  note: z.string().optional(),
+});
