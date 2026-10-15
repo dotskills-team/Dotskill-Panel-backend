@@ -28,6 +28,16 @@ router.post(
   TeamSalaryControllers.generateMonthlySalary,
 );
 
+router.patch(
+  "/:id",
+  checkAuth(
+    Role.SUPER_ADMIN,
+    Role.ADMIN,
+    Role.MANAGER,
+  ),
+  TeamSalaryControllers.updateTeamSalary,
+);
+
 router.post(
   "/",
   checkAuth(
