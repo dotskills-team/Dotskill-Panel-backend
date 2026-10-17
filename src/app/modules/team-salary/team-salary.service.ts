@@ -881,6 +881,24 @@ const assertValidMonthYear = (month: number, year: number) => {
   }
 };
 
+// Paid amount component-wise (payments array theke; old payment = SALARY)
+const getPaidBreakdown = (salary: {
+  payments?: { amount: number; paymentFor?: string }[];
+}) => {
+  let salaryPaid = 0;
+  let extraPaid = 0;
+
+  for (const payment of salary.payments ?? []) {
+    if (payment.paymentFor === "EXTRA") {
+      extraPaid += Number(payment.amount);
+    } else {
+      salaryPaid += Number(payment.amount);
+    }
+  }
+
+  return { salaryPaid, extraPaid };
+};
+
 const getSalaryEligibleUsers = async () => {
   return User.find({
     isDeleted: false,
@@ -1003,10 +1021,12 @@ const updateTeamSalary = async (
     const extraAmount = Number(payload.extraAmount ?? salary.extraAmount ?? 0);
     const totalAmount = Number(salary.salaryAmount) + extraAmount;
 
-    if (totalAmount < Number(salary.paidAmount)) {
+    const { extraPaid } = getPaidBreakdown(salary);
+
+    if (extraAmount < extraPaid) {
       throw new AppError(
         httpStatus.BAD_REQUEST,
-        `Total amount (${totalAmount}) cannot be less than the already paid amount (${salary.paidAmount}).`,
+        `Extra amount (${extraAmount}) cannot be less than the already paid extra (${extraPaid}).`,
       );
     }
 
@@ -1267,6 +1287,7 @@ const createSalaryPayment = async (
   assertValidObjectId(payload.financialAccountId);
 
   const amount = Number(payload.amount);
+  const paymentFor = payload.paymentFor ?? "SALARY";
   const session = await mongoose.startSession();
 
   try {
@@ -1276,12 +1297,6 @@ const createSalaryPayment = async (
       if (!salary) {
         throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
       }
-      if (salary.status === SalaryPaymentStatus.PAID) {
-        throw new AppError(
-          httpStatus.BAD_REQUEST,
-          "This salary has already been fully paid.",
-        );
-      }
       if (salary.status === SalaryPaymentStatus.CANCELLED) {
         throw new AppError(
           httpStatus.BAD_REQUEST,
@@ -1290,21 +1305,50 @@ const createSalaryPayment = async (
       }
 
       const totalAmount = getTotalAmount(salary);
-      const currentDue = totalAmount - Number(salary.paidAmount);
+      const extraAmount = Number(salary.extraAmount ?? 0);
+      const { salaryPaid, extraPaid } = getPaidBreakdown(salary);
 
-      if (amount > currentDue) {
+      if (paymentFor === "EXTRA" && extraAmount <= 0) {
         throw new AppError(
           httpStatus.BAD_REQUEST,
-          `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
+          "This salary record has no extra amount.",
         );
       }
+
+      const componentDue =
+        paymentFor === "EXTRA"
+          ? extraAmount - extraPaid
+          : Number(salary.salaryAmount) - salaryPaid;
+
+      if (componentDue <= 0) {
+        throw new AppError(
+          httpStatus.BAD_REQUEST,
+          paymentFor === "EXTRA"
+            ? "Extra amount has already been fully paid."
+            : "Base salary has already been fully paid.",
+        );
+      }
+
+      if (amount > componentDue) {
+        throw new AppError(
+          httpStatus.BAD_REQUEST,
+          `Payment amount cannot exceed the outstanding ${
+            paymentFor === "EXTRA" ? "extra" : "salary"
+          } amount of ${componentDue}.`,
+        );
+      }
+
+      const defaultNote =
+        paymentFor === "EXTRA"
+          ? `${salary.extraName || "Extra"} payment`
+          : "Salary payment";
 
       const account = await applyAccountChange({
         accountId: payload.financialAccountId,
         amount: -amount,
         type: TRANSACTION_TYPE.SALARY,
         date: payload.paymentDate,
-        note: payload.note || "Salary payment",
+        note: payload.note || defaultNote,
         refModel: "TeamSalary",
         refId: salary._id,
         userId: decodedToken.userId,
@@ -1335,6 +1379,7 @@ const createSalaryPayment = async (
 
       salary.payments.push({
         amount,
+        paymentFor,
         financialAccountId: account._id,
         paymentMethod: payload.paymentMethod as PaymentMethod,
         paymentDate: new Date(payload.paymentDate),
