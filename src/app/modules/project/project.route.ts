@@ -44,11 +44,18 @@ router.get(
 );
 
 router.get(
+  "/my-projects",
+  checkAuth(Role.DEVELOPER),
+  ProjectControllers.getMyAssignedProjects,
+);
+
+router.get(
   "/:id",
   checkAuth(
     Role.SUPER_ADMIN,
     Role.ADMIN,
     Role.MANAGER,
+    Role.DEVELOPER,
   ),
   ProjectControllers.getProjectById,
 );
@@ -95,6 +102,12 @@ router.delete(
     Role.SUPER_ADMIN,
   ),
   ProjectControllers.permanentDeleteProject,
+);
+
+router.get(
+  "/my-projects",
+  checkAuth(Role.DEVELOPER),
+  ProjectControllers.getMyAssignedProjects,
 );
 
 

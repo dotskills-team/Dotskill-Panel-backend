@@ -38,6 +38,8 @@ export const checkAuth =
         email: verifiedToken.email,
       }).select("_id email role status isDeleted passwordChangedAt");
 
+
+      console.log("user", user);
       if (!user) {
         throw new AppError(httpStatus.UNAUTHORIZED, "Authentication failed.");
       }

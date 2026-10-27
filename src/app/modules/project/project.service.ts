@@ -222,6 +222,17 @@ const populateOptions = [
   }
 ];
 
+// Limited populate for developers: no payment/financial data, no client contact info
+const developerPopulateOptions = [
+  { path: "client", select: "firstName lastName" },
+  { path: "projectManager", select: "firstName lastName email" },
+  { path: "developers", select: "firstName lastName email" },
+];
+
+// Hide money-related fields from developers
+const DEVELOPER_HIDDEN_FIELDS =
+  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -deletedBy -deletedAt";
+
 const sanitizeQuery = (
   query: Record<string, string>,
 ) => {
@@ -790,6 +801,152 @@ const getDeletedProjects = async (
   };
 };
 
+// Query keys a developer must never be able to inject through the URL
+const DEVELOPER_BLOCKED_QUERY_KEYS = [
+  "developers",
+  "isDeleted",
+  "isActive",
+  "deletedBy",
+  "budget",
+  "payments",
+  "paymentSchedule",
+  "paymentStatus",
+  "nextPaymentDate",
+  "balanceReversed",
+  "fields",
+];
+
+// Status counts only (no money totals for developers)
+const getDeveloperStatusStats = async (
+  filter: Record<string, unknown> = {},
+) => {
+  const byStatus = await Project.aggregate([
+    {
+      $match: {
+        isDeleted: { $ne: true },
+        status: { $ne: "CANCELLED" },
+        ...filter,
+      },
+    },
+    { $group: { _id: "$status", count: { $sum: 1 } } },
+  ]);
+
+  const result = {
+    total: 0,
+    Planning: 0,
+    InProgress: 0,
+    OnHold: 0,
+    Completed: 0,
+    DoneDue: 0,
+    Delivered: 0,
+  };
+
+  byStatus.forEach((s: { _id: string; count: number }) => {
+    switch (s._id) {
+      case "PLANNING":
+        result.Planning = s.count;
+        break;
+      case "IN_PROGRESS":
+        result.InProgress = s.count;
+        break;
+      case "ON_HOLD":
+        result.OnHold = s.count;
+        break;
+      case "COMPLETED":
+        result.Completed = s.count;
+        break;
+      case "DONE_DUE":
+        result.DoneDue = s.count;
+        break;
+      case "DELIVERED":
+        result.Delivered = s.count;
+        break;
+    }
+
+    result.total += s.count;
+  });
+
+  return result;
+};
+
+/**
+ * Get projects assigned to the logged-in developer.
+ * Supports filter, search, sort, pagination and status stats (same as getProjects).
+ * Default sort: priority ascending (1 = highest).
+ */
+const getMyAssignedProjects = async (
+  decodedToken: JwtPayload,
+  query: Record<string, string>,
+) => {
+  assertValidObjectId(decodedToken.userId, "User ID");
+  const developerId = toObjectId(decodedToken.userId);
+
+  const cleanQuery = sanitizeQuery(query);
+  DEVELOPER_BLOCKED_QUERY_KEYS.forEach((key) => delete cleanQuery[key]);
+
+  const dateFilterObj = buildDateFilter(cleanQuery);
+
+  if (!cleanQuery.sort) {
+    cleanQuery.sort = "priority";
+  }
+
+  const baseFilter: Record<string, any> = {
+    developers: developerId,
+    isDeleted: false,
+    ...dateFilterObj,
+  };
+
+  const queryBuilder = new QueryBuilder(
+    Project.find(baseFilter),
+    cleanQuery,
+  );
+
+  const projectsQuery = queryBuilder
+    .filter()
+    .search(projectSearchableFields)
+    .sort()
+    .fields()
+    .paginate();
+
+  const statsFilter = new QueryBuilder(
+    Project.find(baseFilter),
+    { ...cleanQuery },
+  )
+    .filter()
+    .search(projectSearchableFields)
+    .build()
+    .cast(Project);
+
+  // Distinct clients of this developer's projects (for the client filter dropdown)
+  const getClientOptions = async () => {
+    const clientIds = await Project.find({
+      developers: developerId,
+      isDeleted: false,
+    }).distinct("client");
+
+    return Client.find({ _id: { $in: clientIds } })
+      .select("firstName lastName")
+      .lean();
+  };
+
+  const [data, meta, stats, clients] = await Promise.all([
+    projectsQuery
+      .build()
+      .select(DEVELOPER_HIDDEN_FIELDS)
+      .populate(developerPopulateOptions),
+
+    queryBuilder.getMeta(),
+    getDeveloperStatusStats(statsFilter),
+    getClientOptions(),
+  ]);
+
+  return {
+    data,
+    meta,
+    stats: { ...stats, clients },
+  };
+};
+
 /**
  * Get Project By ID
  */
@@ -1201,4 +1358,6 @@ export const ProjectServices = {
   restoreProject,
   sendProjectInvoice,
   permanentlyDeleteProject,
+  getMyAssignedProjects,
+
 };

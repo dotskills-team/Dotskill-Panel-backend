@@ -187,6 +187,24 @@ const permanentDeleteProject = catchAsync(
   },
 );
 
+const getMyAssignedProjects = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const result = await ProjectServices.getMyAssignedProjects(
+      req.user as JwtPayload,
+      req.query as Record<string, string>,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Assigned projects retrieved successfully.",
+      data: result.data,
+      meta: result.meta,
+      stats: result.stats,
+    });
+  },
+);
+
 
 export const ProjectControllers = {
     createProject,
@@ -197,5 +215,6 @@ export const ProjectControllers = {
     softDeleteProject,
     restoreProject,
     sendProjectInvoice,
-    permanentDeleteProject
+    permanentDeleteProject,
+    getMyAssignedProjects,
 };
