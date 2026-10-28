@@ -27,13 +27,10 @@ const createProject = catchAsync(
 );
 
 const getProjects = catchAsync(
-    async (
-        req: Request,
-        res: Response,
-        _next: NextFunction,
-    ) => {
+    async (req: Request, res: Response, _next: NextFunction) => {
         const result = await ProjectServices.getProjects(
             req.query as Record<string, string>,
+            req.user as JwtPayload,
         );
 
         sendResponse(res, {
@@ -43,6 +40,22 @@ const getProjects = catchAsync(
             data: result.data,
             meta: result.meta,
             stats: result.stats,
+        });
+    },
+);
+
+const getProjectById = catchAsync(
+    async (req: Request, res: Response, _next: NextFunction) => {
+        const result = await ProjectServices.getProjectById(
+            req.params.id as string,
+            req.user as JwtPayload,
+        );
+
+        sendResponse(res, {
+            statusCode: httpStatus.OK,
+            success: true,
+            message: "Project retrieved successfully.",
+            data: result.data,
         });
     },
 );
@@ -67,25 +80,7 @@ const getDeletedProjects = catchAsync(
     },
 );
 
-const getProjectById = catchAsync(
-    async (
-        req: Request,
-        res: Response,
-        _next: NextFunction,
-    ) => {
-        const projectId = req.params.id as string;
 
-        const result =
-            await ProjectServices.getProjectById(projectId);
-
-        sendResponse(res, {
-            statusCode: httpStatus.OK,
-            success: true,
-            message: "Project retrieved successfully.",
-            data: result.data,
-        });
-    },
-);
 
 const updateProject = catchAsync(
     async (

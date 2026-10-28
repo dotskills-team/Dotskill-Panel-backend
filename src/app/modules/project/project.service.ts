@@ -229,6 +229,26 @@ const developerPopulateOptions = [
   { path: "developers", select: "firstName lastName email" },
 ];
 
+// Fields a manager must never receive
+const MANAGER_HIDDEN_FIELDS =
+  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed";
+
+// Query keys a manager must not use to probe money data
+const MANAGER_BLOCKED_QUERY_KEYS = [
+  "budget",
+  "payments",
+  "paymentSchedule",
+  "paymentStatus",
+  "nextPaymentDate",
+  "balanceReversed",
+  "fields",
+];
+
+// Payment populate is pointless without payments
+const managerPopulateOptions = populateOptions.filter(
+  (o) => o.path !== "payments.financialAccountId",
+);
+
 // Hide money-related fields from developers
 const DEVELOPER_HIDDEN_FIELDS =
   "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -deletedBy -deletedAt";
@@ -714,10 +734,71 @@ const applyBalanceDiff = async (
 /**
  * Get All Active Projects
  */
+// const getProjects = async (
+//   query: Record<string, string>,
+// ) => {
+//   const cleanQuery = sanitizeQuery(query);
+//   const dateFilterObj = buildDateFilter(cleanQuery);
+
+//   if (!cleanQuery.sort) {
+//     cleanQuery.sort = "-startDate";
+//   }
+
+//   const baseFilter: Record<string, any> = {
+//     isDeleted: false,
+//     ...dateFilterObj,
+//   };
+
+//   const queryBuilder = new QueryBuilder(
+//     Project.find(baseFilter),
+//     cleanQuery,
+//   );
+
+//   const projectsQuery = queryBuilder
+//     .filter()
+//     .search(projectSearchableFields)
+//     .sort()
+//     .fields()
+//     .paginate();
+
+//   const statsFilter = new QueryBuilder(
+//     Project.find(baseFilter),
+//     { ...cleanQuery },
+//   )
+//     .filter()
+//     .search(projectSearchableFields)
+//     .build()
+//     .cast(Project);
+
+//   const [data, meta, stats] = await Promise.all([
+//     projectsQuery
+//       .build()
+//       .populate(populateOptions),
+
+//     queryBuilder.getMeta(),
+//     getStatusStats(statsFilter),
+//   ]);
+
+//   return {
+//     data,
+//     meta,
+//     stats,
+//   };
+// };
+
+
+
 const getProjects = async (
   query: Record<string, string>,
+  decodedToken?: JwtPayload,
 ) => {
+  const isManager = decodedToken?.role === Role.MANAGER;
+
   const cleanQuery = sanitizeQuery(query);
+  if (isManager) {
+    MANAGER_BLOCKED_QUERY_KEYS.forEach((key) => delete cleanQuery[key]);
+  }
+
   const dateFilterObj = buildDateFilter(cleanQuery);
 
   if (!cleanQuery.sort) {
@@ -750,13 +831,17 @@ const getProjects = async (
     .build()
     .cast(Project);
 
+  let listQuery = projectsQuery.build();
+  if (isManager) {
+    listQuery = listQuery.select(MANAGER_HIDDEN_FIELDS);
+  }
+
   const [data, meta, stats] = await Promise.all([
-    projectsQuery
-      .build()
-      .populate(populateOptions),
+    listQuery.populate(isManager ? managerPopulateOptions : populateOptions),
 
     queryBuilder.getMeta(),
-    getStatusStats(statsFilter),
+    // Managers get status counts only (no totalValue/totalPaid/totalDue)
+    isManager ? getDeveloperStatusStats(statsFilter) : getStatusStats(statsFilter),
   ]);
 
   return {
@@ -765,6 +850,7 @@ const getProjects = async (
     stats,
   };
 };
+
 /**
  * Get Deleted Projects
  */
@@ -950,11 +1036,42 @@ const getMyAssignedProjects = async (
 /**
  * Get Project By ID
  */
+// const getProjectById = async (
+//   projectId: string,
+// ) => {
+//   const project =
+//     await assertProjectExists(projectId);
+
+//   await project.populate(populateOptions);
+
+//   return {
+//     data: project,
+//   };
+// };
+
+
 const getProjectById = async (
   projectId: string,
+  decodedToken?: JwtPayload,
 ) => {
-  const project =
-    await assertProjectExists(projectId);
+  if (decodedToken?.role === Role.MANAGER) {
+    assertValidObjectId(projectId, "Project ID");
+
+    const managerProject = await Project.findOne({
+      _id: projectId,
+      isDeleted: false,
+    })
+      .select(MANAGER_HIDDEN_FIELDS)
+      .populate(managerPopulateOptions);
+
+    if (!managerProject) {
+      throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
+    }
+
+    return { data: managerProject };
+  }
+
+  const project = await assertProjectExists(projectId);
 
   await project.populate(populateOptions);
 

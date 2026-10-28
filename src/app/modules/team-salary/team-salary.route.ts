@@ -58,6 +58,19 @@ router.get(
   TeamSalaryControllers.getTeamSalaries,
 );
 
+// Must be declared BEFORE "/:id"
+router.get(
+  "/my-salaries",
+  checkAuth(
+    Role.MANAGER,
+    Role.DEVELOPER,
+    Role.DESIGNER,
+    Role.MARKETER,
+    Role.STAFF,
+  ),
+  TeamSalaryControllers.getMySalaries,
+);
+
 router.get(
   "/user/:userId",
   checkAuth(

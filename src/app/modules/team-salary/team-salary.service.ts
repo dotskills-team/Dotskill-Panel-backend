@@ -1,814 +1,3 @@
-// import httpStatus from "http-status-codes";
-// import { Types } from "mongoose";
-// import { JwtPayload } from "jsonwebtoken";
-
-// import { TeamSalary } from "./team-salary.model";
-// import {
-//   SalaryPaymentStatus,
-//   SALARY_PAYMENT_STATUSES,
-// } from "./team-salary.constant";
-// import {
-//   CreateSalaryPaymentInput,
-//   CreateTeamSalaryInput,
-//   GenerateMonthlySalaryInput,
-// } from "./team-salary.validation";
-
-// import { User } from "../user/user.model";
-// import { Role, PaymentMethod, UserStatus } from "../user/user.interface";
-
-// import AppError from "../../errorHelpers/appError";
-// import { QueryBuilder } from "../../utils/QueryBuilder";
-
-
-// import mongoose from "mongoose";
-// import { FinancialAccount } from "../financial-account/financial-account.model";
-// import { ACCOUNT_STATUS } from "../financial-account/financial-account.constant";
-
-// import { applyAccountChange } from "../transaction/ledger.service";
-// import { TRANSACTION_TYPE } from "../transaction/transaction.constant";
-// const assertValidObjectId = (id: string) => {
-//   if (!Types.ObjectId.isValid(id)) {
-//     throw new AppError(httpStatus.BAD_REQUEST, "Invalid object ID.");
-//   }
-// };
-
-// const toObjectId = (id: string) => new Types.ObjectId(id);
-
-// const getSalaryStatus = (
-//   salaryAmount: number,
-//   paidAmount: number,
-// ): SalaryPaymentStatus => {
-//   if (paidAmount <= 0) {
-//     return SalaryPaymentStatus.PENDING;
-//   }
-
-//   if (paidAmount < salaryAmount) {
-//     return SalaryPaymentStatus.PARTIAL;
-//   }
-
-//   return SalaryPaymentStatus.PAID;
-// };
-
-// const assertValidMonthYear = (month: number, year: number) => {
-//   if (month < 1 || month > 12) {
-//     throw new AppError(
-//       httpStatus.BAD_REQUEST,
-//       "Month must be between 1 and 12.",
-//     );
-//   }
-
-//   if (year < 2000 || year > 3000) {
-//     throw new AppError(httpStatus.BAD_REQUEST, "Invalid payroll year.");
-//   }
-// };
-
-// const getSalaryEligibleUsers = async () => {
-//   return User.find({
-//     isDeleted: false,
-//     status: UserStatus.ACTIVE,
-//     role: {
-//       $in: [
-//         Role.MANAGER,
-//         Role.DEVELOPER,
-//         Role.DESIGNER,
-//         Role.MARKETER,
-//         Role.STAFF,
-//       ],
-//     },
-//     salary: {
-//       $gt: 0,
-//     },
-//   });
-// };
-
-// const createTeamSalary = async (
-//   payload: CreateTeamSalaryInput,
-//   decodedToken: JwtPayload,
-// ) => {
-//   assertValidObjectId(payload.user);
-
-//   assertValidMonthYear(payload.month, payload.year);
-
-//   const user = await User.findOne({
-//     _id: payload.user,
-//     isDeleted: false,
-//     status: UserStatus.ACTIVE,
-//   }).select("firstName lastName email role salary paymentMethod");
-
-//   if (!user) {
-//     throw new AppError(httpStatus.NOT_FOUND, "Active user not found.");
-//   }
-
-//   if (!user.salary || user.salary <= 0) {
-//     throw new AppError(
-//       httpStatus.BAD_REQUEST,
-//       "This user does not have a valid monthly salary.",
-//     );
-//   }
-
-//   const existingSalary = await TeamSalary.findOne({
-//     user: user._id,
-//     month: payload.month,
-//     year: payload.year,
-//   });
-
-//   if (existingSalary) {
-//     throw new AppError(
-//       httpStatus.CONFLICT,
-//       "Salary record already exists for this user and month.",
-//     );
-//   }
-
-//   const salaryAmount = Number(user.salary);
-
-//   const salary = await TeamSalary.create({
-//     user: user._id,
-
-//     month: payload.month,
-//     year: payload.year,
-
-//     salaryAmount,
-//     paidAmount: 0,
-//     dueAmount: salaryAmount,
-
-//     status: SalaryPaymentStatus.PENDING,
-
-//     note: payload.note,
-
-//     createdBy: decodedToken.userId
-//       ? toObjectId(decodedToken.userId)
-//       : undefined,
-//   });
-
-//   const populatedSalary = await TeamSalary.findById(salary._id)
-//     .populate(
-//       "user",
-//       "firstName lastName email phone role designation department salary paymentMethod avatar",
-//     )
-//     .populate("cancelledBy", "firstName lastName email designation");
-
-//   return {
-//     data: populatedSalary,
-//   };
-// };
-
-// const generateMonthlySalary = async (
-//   payload: GenerateMonthlySalaryInput,
-//   decodedToken: JwtPayload,
-// ) => {
-//   assertValidMonthYear(payload.month, payload.year);
-
-//   const users = await getSalaryEligibleUsers();
-
-//   if (!users.length) {
-//     return {
-//       data: [],
-//       summary: {
-//         totalEmployees: 0,
-//         created: 0,
-//         skipped: 0,
-//       },
-//     };
-//   }
-
-//   const existingRecords = await TeamSalary.find({
-//     month: payload.month,
-//     year: payload.year,
-//   }).select("user");
-
-//   const existingUserIds = new Set(
-//     existingRecords.map((item) => item.user.toString()),
-//   );
-
-//   const newRecords = users
-//     .filter((user) => !existingUserIds.has(user._id.toString()))
-//     .map((user) => ({
-//       user: user._id,
-
-//       month: payload.month,
-//       year: payload.year,
-
-//       salaryAmount: Number(user.salary),
-
-//       paidAmount: 0,
-//       dueAmount: Number(user.salary),
-
-//       status: SalaryPaymentStatus.PENDING,
-
-//       createdBy: decodedToken.userId
-//         ? toObjectId(decodedToken.userId)
-//         : undefined,
-//     }));
-
-//   if (newRecords.length) {
-//     await TeamSalary.insertMany(newRecords);
-//   }
-
-//   const data = await TeamSalary.find({
-//     month: payload.month,
-//     year: payload.year,
-//   })
-//     .populate(
-//       "user",
-//       "firstName lastName email phone role designation department salary paymentMethod avatar",
-//     )
-//     .sort({
-//       createdAt: -1,
-//     });
-
-//   return {
-//     data,
-//     summary: {
-//       totalEmployees: users.length,
-//       created: newRecords.length,
-//       skipped: users.length - newRecords.length,
-//     },
-//   };
-// };
-
-// const getTeamSalaries = async (query: Record<string, string>) => {
-//   const baseFilter: Record<string, any> = {};
-
-//   if (query.month) {
-//     baseFilter.month = Number(query.month);
-//   }
-
-//   if (query.year) {
-//     baseFilter.year = Number(query.year);
-//   }
-
-//   if (query.status) {
-//     baseFilter.status = query.status;
-//   }
-
-//   if (query.user) {
-//     assertValidObjectId(query.user);
-//     baseFilter.user = toObjectId(query.user);
-//   }
-
-//   if (query.searchTerm) {
-//     const searchRegex = {
-//       $regex: query.searchTerm,
-//       $options: "i",
-//     };
-
-//     const users = await User.find({
-//       isDeleted: false,
-//       $or: [
-//         { firstName: searchRegex },
-//         { lastName: searchRegex },
-//         { email: searchRegex },
-//         { phone: searchRegex },
-//         { designation: searchRegex },
-//         { department: searchRegex },
-//       ],
-//     }).select("_id");
-
-//     const matchingUserIds = users.map((user) => user._id);
-
-//     baseFilter.user = {
-//       ...(baseFilter.user ? { $eq: baseFilter.user } : {}),
-//       $in: matchingUserIds,
-//     };
-//   }
-
-//   if (query.paymentMethod) {
-//     const paymentMethodValue = query.paymentMethod as PaymentMethod;
-
-//     const users = await User.find({
-//       isDeleted: false,
-//       paymentMethod: paymentMethodValue,
-//     } as any).select("_id");
-
-//     const paymentMethodUserIds = users.map((user) => user._id);
-
-//     if (baseFilter.user?.$in) {
-//       baseFilter.user.$in = baseFilter.user.$in.filter((id: Types.ObjectId) =>
-//         paymentMethodUserIds.some(
-//           (paymentUserId) => paymentUserId.toString() === id.toString(),
-//         ),
-//       );
-//     } else {
-//       baseFilter.user = {
-//         $in: paymentMethodUserIds,
-//       };
-//     }
-//   }
-
-//   const queryForBuilder = {
-//     ...query,
-//   };
-
-//   delete queryForBuilder.searchTerm;
-//   delete queryForBuilder.paymentMethod;
-
-//   const queryBuilder = new QueryBuilder(
-//     TeamSalary.find(baseFilter).populate(
-//       "user",
-//       "firstName lastName email phone role designation department salary paymentMethod avatar",
-//     ),
-//     queryForBuilder,
-//   );
-
-//   const salariesQuery = queryBuilder.filter().sort().fields().paginate();
-
-//   const [data, meta] = await Promise.all([
-//     salariesQuery.build(),
-//     queryBuilder.getMeta(),
-//   ]);
-
-//   return {
-//     data,
-//     meta,
-//   };
-// };
-
-// const getTeamSalaryById = async (salaryId: string) => {
-//   assertValidObjectId(salaryId);
-
-//   const salary = await TeamSalary.findOne({
-//     _id: salaryId,
-//   }).populate(
-//     "user",
-//     "firstName lastName email phone role designation department salary paymentMethod avatar",
-//   );
-
-//   if (!salary) {
-//     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
-//   }
-
-//   return {
-//     data: salary,
-//   };
-// };
-
-// const getUserSalaryHistory = async (
-//   userId: string,
-//   query: Record<string, string>,
-// ) => {
-//   assertValidObjectId(userId);
-
-//   const user = await User.findOne({
-//     _id: userId,
-//     isDeleted: false,
-//   }).select("firstName lastName email salary paymentMethod");
-
-//   if (!user) {
-//     throw new AppError(httpStatus.NOT_FOUND, "User not found.");
-//   }
-
-//   const baseFilter: Record<string, any> = {
-//     user: toObjectId(userId),
-//   };
-
-//   if (query.year) {
-//     baseFilter.year = Number(query.year);
-//   }
-
-//   if (query.status) {
-//     baseFilter.status = query.status;
-//   }
-
-//   const queryBuilder = new QueryBuilder(TeamSalary.find(baseFilter), query);
-
-//   const salariesQuery = queryBuilder.filter().sort().fields().paginate();
-
-//   const [data, meta] = await Promise.all([
-//     salariesQuery.build(),
-//     queryBuilder.getMeta(),
-//   ]);
-
-//   return {
-//     data,
-//     meta,
-//   };
-// };
-
-// // const createSalaryPayment = async (
-// //   salaryId: string,
-// //   payload: CreateSalaryPaymentInput,
-// //   decodedToken: JwtPayload,
-// // ) => {
-// //   assertValidObjectId(salaryId);
-
-// //   const salary = await TeamSalary.findById(salaryId);
-
-// //   if (!salary) {
-// //     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
-// //   }
-
-// //   if (salary.status === SalaryPaymentStatus.PAID) {
-// //     throw new AppError(
-// //       httpStatus.BAD_REQUEST,
-// //       "This salary has already been fully paid.",
-// //     );
-// //   }
-
-// //   if (salary.status === SalaryPaymentStatus.CANCELLED) {
-// //     throw new AppError(
-// //       httpStatus.BAD_REQUEST,
-// //       "Cancelled salary cannot receive payments.",
-// //     );
-// //   }
-
-// //   const amount = Number(payload.amount);
-
-// //   if (amount <= 0) {
-// //     throw new AppError(
-// //       httpStatus.BAD_REQUEST,
-// //       "Payment amount must be greater than zero.",
-// //     );
-// //   }
-
-// //   const currentDue = Number(salary.dueAmount);
-
-// //   /**
-// //    * Never allow overpayment.
-// //    */
-// //   if (amount > currentDue) {
-// //     throw new AppError(
-// //       httpStatus.BAD_REQUEST,
-// //       `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
-// //     );
-// //   }
-
-// //   const newPaidAmount = Number(salary.paidAmount) + amount;
-
-// //   const newDueAmount = Number(salary.salaryAmount) - newPaidAmount;
-
-// //   const newStatus = getSalaryStatus(Number(salary.salaryAmount), newPaidAmount);
-
-// //   salary.paidAmount = newPaidAmount;
-// //   salary.dueAmount = Math.max(newDueAmount, 0);
-// //   salary.status = newStatus;
-
-// //   salary.payments.push({
-// //     amount,
-
-// //     paymentMethod: payload.paymentMethod as PaymentMethod,
-
-// //     paymentDate: new Date(payload.paymentDate),
-
-// //     paymentReference: payload.paymentReference,
-
-// //     note: payload.note,
-
-// //     recordedBy: decodedToken.userId
-// //       ? toObjectId(decodedToken.userId)
-// //       : undefined,
-// //   });
-
-// //   salary.updatedBy = toObjectId(decodedToken.userId);
-
-// //   await salary.save();
-
-// //   const populatedSalary = await TeamSalary.findById(salary._id)
-// //     .populate(
-// //       "user",
-// //       "firstName lastName email phone role designation department salary paymentMethod avatar",
-// //     )
-// //     .populate("cancelledBy", "firstName lastName email designation");
-
-// //   return {
-// //     data: populatedSalary,
-// //   };
-// // };
-// const createSalaryPayment = async (
-//   salaryId: string,
-//   payload: CreateSalaryPaymentInput,
-//   decodedToken: JwtPayload,
-// ) => {
-//   assertValidObjectId(salaryId);
-//   assertValidObjectId(payload.financialAccountId);
-
-//   const amount = Number(payload.amount);
-//   const session = await mongoose.startSession();
-
-//   try {
-//     await session.withTransaction(async () => {
-//       const salary = await TeamSalary.findById(salaryId).session(session);
-
-//       if (!salary) {
-//         throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
-//       }
-//       if (salary.status === SalaryPaymentStatus.PAID) {
-//         throw new AppError(httpStatus.BAD_REQUEST, "This salary has already been fully paid.");
-//       }
-//       if (salary.status === SalaryPaymentStatus.CANCELLED) {
-//         throw new AppError(httpStatus.BAD_REQUEST, "Cancelled salary cannot receive payments.");
-//       }
-
-//       const currentDue = Number(salary.dueAmount);
-//       if (amount > currentDue) {
-//         throw new AppError(
-//           httpStatus.BAD_REQUEST,
-//           `Payment amount cannot exceed the outstanding amount of ${currentDue}.`,
-//         );
-//       }
-
-//       // account থেকে টাকা কাটা (ব্যালেন্স থাকলে তবেই কাটবে)
-//       // const account = await FinancialAccount.findOneAndUpdate(
-//       //   {
-//       //     _id: payload.financialAccountId,
-//       //     isDeleted: false,
-//       //     status: ACCOUNT_STATUS.ACTIVE,
-//       //     currentBalance: { $gte: amount },
-//       //   },
-//       //   {
-//       //     $inc: { currentBalance: -amount },
-//       //     updatedBy: toObjectId(decodedToken.userId),
-//       //   },
-//       //   { new: true, session },
-//       // );
-//       const account = await applyAccountChange({
-//         accountId: payload.financialAccountId,
-//         amount: -amount,
-//         type: TRANSACTION_TYPE.SALARY,
-//         date: payload.paymentDate,
-//         note: payload.note || "Salary payment",
-//         refModel: "TeamSalary",
-//         refId: salary._id,
-//         userId: decodedToken.userId,
-//         session,
-//         requireActive: true,
-//       });
-//       if (!account) {
-//         const exists = await FinancialAccount.findOne({
-//           _id: payload.financialAccountId,
-//           isDeleted: false,
-//         }).session(session);
-
-//         throw new AppError(
-//           exists ? httpStatus.BAD_REQUEST : httpStatus.NOT_FOUND,
-//           exists
-//             ? "Account-এ পর্যাপ্ত ব্যালেন্স নেই (অথবা account inactive)।"
-//             : "Financial account not found.",
-//         );
-//       }
-
-//       const newPaidAmount = Number(salary.paidAmount) + amount;
-
-//       salary.paidAmount = newPaidAmount;
-//       salary.dueAmount = Math.max(Number(salary.salaryAmount) - newPaidAmount, 0);
-//       salary.status = getSalaryStatus(Number(salary.salaryAmount), newPaidAmount);
-
-//       salary.payments.push({
-//         amount,
-//         financialAccountId: account._id,
-//         paymentMethod: payload.paymentMethod as PaymentMethod,
-//         paymentDate: new Date(payload.paymentDate),
-//         paymentReference: payload.paymentReference,
-//         note: payload.note,
-//         recordedBy: toObjectId(decodedToken.userId),
-//       });
-
-//       salary.updatedBy = toObjectId(decodedToken.userId);
-
-//       await salary.save({ session });
-//     });
-//   } finally {
-//     await session.endSession();
-//   }
-
-//   const populatedSalary = await TeamSalary.findById(salaryId)
-//     .populate(
-//       "user",
-//       "firstName lastName email phone role designation department salary paymentMethod avatar",
-//     )
-//     .populate("cancelledBy", "firstName lastName email designation");
-
-//   return { data: populatedSalary };
-// };
-// // const deleteTeamSalary = async (id: string) => {
-// //   const salary = await TeamSalary.findById(id);
-
-// //   if (!salary) {
-// //     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found");
-// //   }
-
-// //   // if (salary.payments && salary.payments.length > 0) {
-// //   //   throw new AppError(
-// //   //     httpStatus.BAD_REQUEST,
-// //   //     "A salary record with recorded payments cannot be deleted. Cancel it instead.",
-// //   //   );
-// //   // }
-
-// //   await TeamSalary.findByIdAndDelete(id);
-
-// //   return null;
-// // };
-// const deleteTeamSalary = async (id: string) => {
-//   assertValidObjectId(id);
-
-//   const session = await mongoose.startSession();
-
-//   try {
-//     await session.withTransaction(async () => {
-//       const salary = await TeamSalary.findById(id).session(session);
-
-//       if (!salary) {
-//         throw new AppError(httpStatus.NOT_FOUND, "Salary record not found");
-//       }
-
-//       // for (const payment of salary.payments) {
-//       //   if (payment.financialAccountId) {
-//       //     await FinancialAccount.findByIdAndUpdate(
-//       //       payment.financialAccountId,
-//       //       { $inc: { currentBalance: payment.amount } },
-//       //       { session },
-//       //     );
-//       //   }
-//       // }
-//             for (const payment of salary.payments) {
-//         if (payment.financialAccountId) {
-//           await applyAccountChange({
-//             accountId: payment.financialAccountId,
-//             amount: payment.amount,
-//             type: TRANSACTION_TYPE.SALARY,
-//             isReversal: true,
-//             note: "Salary record deleted",
-//             refModel: "TeamSalary",
-//             refId: salary._id,
-//             session,
-//           });
-//         }
-//       }
-
-//       await TeamSalary.findByIdAndDelete(id, { session });
-//     });
-//   } finally {
-//     await session.endSession();
-//   }
-
-//   return null;
-// };
-// const cancelTeamSalary = async (
-//   salaryId: string,
-//   reason: string,
-//   decodedToken: JwtPayload,
-// ) => {
-//   assertValidObjectId(salaryId);
-
-//   const salary = await TeamSalary.findById(salaryId);
-
-//   if (!salary) {
-//     throw new AppError(httpStatus.NOT_FOUND, "Salary record not found.");
-//   }
-
-//   if (salary.status === SalaryPaymentStatus.CANCELLED) {
-//     throw new AppError(
-//       httpStatus.BAD_REQUEST,
-//       "Salary record is already cancelled.",
-//     );
-//   }
-
-//   if (Number(salary.paidAmount) > 0) {
-//     throw new AppError(
-//       httpStatus.BAD_REQUEST,
-//       "A salary with recorded payments cannot be cancelled.",
-//     );
-//   }
-
-//   salary.status = SalaryPaymentStatus.CANCELLED;
-
-//   salary.cancelledAt = new Date();
-
-//   salary.cancelledBy = toObjectId(decodedToken.userId);
-
-//   salary.cancellationReason = reason;
-
-//   salary.updatedBy = toObjectId(decodedToken.userId);
-
-//   await salary.save();
-
-//   return {
-//     data: salary,
-//   };
-// };
-
-// const getSalarySummary = async (query: Record<string, string>) => {
-//   const match: Record<string, any> = {};
-
-//   if (query.month) {
-//     match.month = Number(query.month);
-//   }
-
-//   if (query.year) {
-//     match.year = Number(query.year);
-//   }
-
-//   if (query.status) {
-//     match.status = query.status;
-//   }
-
-//   const [summary] = await TeamSalary.aggregate([
-//     {
-//       $match: match,
-//     },
-
-//     {
-//       $group: {
-//         _id: null,
-
-//         totalSalary: {
-//           $sum: "$salaryAmount",
-//         },
-
-//         totalPaid: {
-//           $sum: "$paidAmount",
-//         },
-
-//         totalDue: {
-//           $sum: "$dueAmount",
-//         },
-
-//         totalRecords: {
-//           $sum: 1,
-//         },
-
-//         pendingCount: {
-//           $sum: {
-//             $cond: [
-//               {
-//                 $eq: ["$status", SalaryPaymentStatus.PENDING],
-//               },
-//               1,
-//               0,
-//             ],
-//           },
-//         },
-
-//         partialCount: {
-//           $sum: {
-//             $cond: [
-//               {
-//                 $eq: ["$status", SalaryPaymentStatus.PARTIAL],
-//               },
-//               1,
-//               0,
-//             ],
-//           },
-//         },
-
-//         paidCount: {
-//           $sum: {
-//             $cond: [
-//               {
-//                 $eq: ["$status", SalaryPaymentStatus.PAID],
-//               },
-//               1,
-//               0,
-//             ],
-//           },
-//         },
-
-//         cancelledCount: {
-//           $sum: {
-//             $cond: [
-//               {
-//                 $eq: ["$status", SalaryPaymentStatus.CANCELLED],
-//               },
-//               1,
-//               0,
-//             ],
-//           },
-//         },
-//       },
-//     },
-//   ]);
-
-//   return {
-//     data: summary ?? {
-//       totalSalary: 0,
-//       totalPaid: 0,
-//       totalDue: 0,
-//       totalRecords: 0,
-//       pendingCount: 0,
-//       partialCount: 0,
-//       paidCount: 0,
-//       cancelledCount: 0,
-//     },
-//   };
-// };
-
-// export const TeamSalaryServices = {
-//   createTeamSalary,
-
-//   generateMonthlySalary,
-
-//   getTeamSalaries,
-//   getTeamSalaryById,
-//   getUserSalaryHistory,
-
-//   createSalaryPayment,
-//   deleteTeamSalary,
-//   cancelTeamSalary,
-
-//   getSalarySummary,
-// };
-
-
-
 
 import httpStatus from "http-status-codes";
 import mongoose, { Types } from "mongoose";
@@ -1556,6 +745,195 @@ const getSalarySummary = async (query: Record<string, string>) => {
   };
 };
 
+// Hide internal/admin-only fields from the employee
+const MY_SALARY_HIDDEN_FIELDS =
+  "-createdBy -updatedBy -cancelledBy -payments.recordedBy -payments.financialAccountId";
+
+// Query keys an employee must never inject through the URL
+const MY_SALARY_BLOCKED_QUERY_KEYS = [
+  "user",
+  "createdBy",
+  "updatedBy",
+  "cancelledBy",
+  "fields",
+];
+
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Stats for the logged-in employee (respects the active filters)
+const getMySalaryStats = async (filter: Record<string, any>) => {
+  const [agg] = await TeamSalary.aggregate([
+    { $match: filter },
+    {
+      $addFields: {
+        effectiveTotal: {
+          $ifNull: [
+            "$totalAmount",
+            { $add: ["$salaryAmount", { $ifNull: ["$extraAmount", 0] }] },
+          ],
+        },
+        isActive: { $ne: ["$status", SalaryPaymentStatus.CANCELLED] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        // Cancelled records are excluded from money totals
+        totalSalary: {
+          $sum: { $cond: ["$isActive", "$effectiveTotal", 0] },
+        },
+        totalPaid: { $sum: { $cond: ["$isActive", "$paidAmount", 0] } },
+        totalDue: { $sum: { $cond: ["$isActive", "$dueAmount", 0] } },
+        Pending: {
+          $sum: {
+            $cond: [{ $eq: ["$status", SalaryPaymentStatus.PENDING] }, 1, 0],
+          },
+        },
+        Partial: {
+          $sum: {
+            $cond: [{ $eq: ["$status", SalaryPaymentStatus.PARTIAL] }, 1, 0],
+          },
+        },
+        Paid: {
+          $sum: {
+            $cond: [{ $eq: ["$status", SalaryPaymentStatus.PAID] }, 1, 0],
+          },
+        },
+        Cancelled: {
+          $sum: {
+            $cond: [{ $eq: ["$status", SalaryPaymentStatus.CANCELLED] }, 1, 0],
+          },
+        },
+      },
+    },
+  ]);
+
+  return {
+    total: agg?.total ?? 0,
+    totalSalary: agg?.totalSalary ?? 0,
+    totalPaid: agg?.totalPaid ?? 0,
+    totalDue: agg?.totalDue ?? 0,
+    Pending: agg?.Pending ?? 0,
+    Partial: agg?.Partial ?? 0,
+    Paid: agg?.Paid ?? 0,
+    Cancelled: agg?.Cancelled ?? 0,
+  };
+};
+
+/**
+ * Salary records of the logged-in employee.
+ * Supports month, year, status, paymentMethod, searchTerm, sort and pagination.
+ * Default sort: newest month first.
+ */
+const getMySalaries = async (
+  decodedToken: JwtPayload,
+  query: Record<string, string>,
+) => {
+  assertValidObjectId(decodedToken.userId);
+  const userId = toObjectId(decodedToken.userId);
+
+  const cleanQuery: Record<string, string> = { ...query };
+
+  Object.keys(cleanQuery).forEach((key) => {
+    if (
+      MY_SALARY_BLOCKED_QUERY_KEYS.includes(key) ||
+      key.startsWith("payments")
+    ) {
+      delete cleanQuery[key];
+    }
+  });
+
+  // The user is always the logged-in employee
+  const baseFilter: Record<string, any> = { user: userId };
+
+  if (cleanQuery.month) {
+    const month = Number(cleanQuery.month);
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Month must be between 1 and 12.",
+      );
+    }
+    baseFilter.month = month;
+  }
+
+  if (cleanQuery.year) {
+    const year = Number(cleanQuery.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 3000) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Invalid payroll year.");
+    }
+    baseFilter.year = year;
+  }
+
+  if (cleanQuery.status) {
+    baseFilter.status = cleanQuery.status;
+  }
+
+  if (cleanQuery.paymentMethod) {
+    baseFilter["payments.paymentMethod"] = cleanQuery.paymentMethod;
+  }
+
+  if (cleanQuery.searchTerm?.trim()) {
+    const regex = {
+      $regex: escapeRegex(cleanQuery.searchTerm.trim()),
+      $options: "i",
+    };
+
+    baseFilter.$or = [
+      { extraName: regex },
+      { note: regex },
+      { "payments.paymentReference": regex },
+      { "payments.note": regex },
+    ];
+  }
+
+  // Already applied to baseFilter, so the builder must not see them again
+  ["month", "year", "status", "paymentMethod", "searchTerm"].forEach(
+    (key) => delete cleanQuery[key],
+  );
+
+  // NOTE: assumes QueryBuilder.sort() splits the sort string by comma
+  if (!cleanQuery.sort) {
+    cleanQuery.sort = "-year,-month";
+  }
+
+  const queryBuilder = new QueryBuilder(
+    TeamSalary.find(baseFilter),
+    cleanQuery,
+  );
+
+  const salariesQuery = queryBuilder.filter().sort().fields().paginate();
+
+  // Dropdown options come from ALL of this employee's records (not filtered)
+  const getFilterOptions = async () => {
+    const [years, paymentMethods] = await Promise.all([
+      TeamSalary.distinct("year", { user: userId }),
+      TeamSalary.distinct("payments.paymentMethod", { user: userId }),
+    ]);
+
+    return {
+      years: (years as number[]).sort((a, b) => b - a),
+      paymentMethods: paymentMethods as string[],
+    };
+  };
+
+  const [data, meta, stats, options] = await Promise.all([
+    salariesQuery.build().select(MY_SALARY_HIDDEN_FIELDS),
+    queryBuilder.getMeta(),
+    getMySalaryStats(baseFilter),
+    getFilterOptions(),
+  ]);
+
+  return {
+    data,
+    meta,
+    stats: { ...stats, ...options },
+  };
+};
+
+
 export const TeamSalaryServices = {
   createTeamSalary,
   updateTeamSalary,
@@ -1571,4 +949,5 @@ export const TeamSalaryServices = {
   cancelTeamSalary,
 
   getSalarySummary,
+  getMySalaries,
 };

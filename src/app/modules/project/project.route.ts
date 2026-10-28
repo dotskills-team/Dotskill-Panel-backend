@@ -17,7 +17,7 @@ router.post(
   checkAuth(
     Role.SUPER_ADMIN,
     Role.ADMIN,
-    Role.MANAGER,
+    // Role.MANAGER,
   ),
   validateRequest(createProjectValidationSchema),
   ProjectControllers.createProject,
@@ -65,7 +65,7 @@ router.patch(
   checkAuth(
     Role.SUPER_ADMIN,
     Role.ADMIN,
-    Role.MANAGER,
+    // Role.MANAGER,
   ),
   validateRequest(updateProjectValidationSchema),
   ProjectControllers.updateProject,
@@ -100,13 +100,14 @@ router.delete(
   "/:id/delete",
   checkAuth(
     Role.SUPER_ADMIN,
+    Role.ADMIN,
   ),
   ProjectControllers.permanentDeleteProject,
 );
 
 router.get(
   "/my-projects",
-  checkAuth(Role.DEVELOPER),
+  checkAuth(Role.DEVELOPER, Role.MANAGER),
   ProjectControllers.getMyAssignedProjects,
 );
 
