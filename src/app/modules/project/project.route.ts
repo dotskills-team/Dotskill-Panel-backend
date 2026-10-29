@@ -17,7 +17,7 @@ router.post(
   checkAuth(
     Role.SUPER_ADMIN,
     Role.ADMIN,
-    // Role.MANAGER,
+    Role.MANAGER,
   ),
   validateRequest(createProjectValidationSchema),
   ProjectControllers.createProject,
@@ -65,7 +65,7 @@ router.patch(
   checkAuth(
     Role.SUPER_ADMIN,
     Role.ADMIN,
-    // Role.MANAGER,
+    Role.MANAGER,
   ),
   validateRequest(updateProjectValidationSchema),
   ProjectControllers.updateProject,

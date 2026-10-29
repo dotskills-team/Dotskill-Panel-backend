@@ -253,6 +253,25 @@ const managerPopulateOptions = populateOptions.filter(
 const DEVELOPER_HIDDEN_FIELDS =
   "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -deletedBy -deletedAt";
 
+
+
+// Money-related keys a manager can never write
+const FINANCIAL_PAYLOAD_KEYS = [
+  "budget",
+  "payments",
+  "paymentSchedule",
+  "paymentStatus",
+  "nextPaymentDate",
+  "balanceReversed",
+];
+
+const stripFinancialFields = (payload: Partial<IProject>): Partial<IProject> => {
+  const copy: Record<string, unknown> = { ...payload };
+  FINANCIAL_PAYLOAD_KEYS.forEach((key) => delete copy[key]);
+  return copy as Partial<IProject>;
+};
+
+
 const sanitizeQuery = (
   query: Record<string, string>,
 ) => {
@@ -468,31 +487,125 @@ const assertCompletePaymentsHaveAccount = (payments?: IPayment[]) => {
   }
 };
 
+// const createProject = async (
+//   payload: Partial<IProject>,
+// ) => {
+//   console.log(
+//     "Payload received in createProject:",
+//     payload,
+//   );
+
+//   // -----------------------------
+//   // Validation
+//   // -----------------------------
+
+//   if (payload.client) {
+//     // await assertClientExists(
+//     //   payload.client.toString(),
+//     //   "Client ID",
+//     // );
+//     const client = await Client.findById(payload.client);
+
+//     if (!client) {
+//       throw new AppError(
+//         httpStatus.BAD_REQUEST,
+//         "Client does not exist.",
+//       );
+//     }
+//   }
+
+//   if (payload.projectManager) {
+//     await assertUserExists(
+//       payload.projectManager.toString(),
+//       "Project manager ID",
+//     );
+//   }
+
+//   if (payload.developers?.length) {
+//     await Promise.all(
+//       payload.developers.map((developer) =>
+//         assertUserExists(
+//           developer.toString(),
+//           "Developer ID",
+//         ),
+//       ),
+//     );
+//   }
+
+//   await validatePayments(payload.payments ?? []);
+
+//   // -----------------------------
+//   // Transaction
+//   // -----------------------------
+
+//   const session = await mongoose.startSession();
+
+//   try {
+//     let createdProject;
+
+//     await session.withTransaction(async () => {
+//       // Priority reorder
+//       if (payload.priority !== undefined) {
+//         await reorderPriority(
+//           payload.priority,
+//           undefined,
+//           undefined,
+//           session,
+//         );
+//       }
+
+//       const sanitizedPayload = {
+//         ...payload,
+//         payments: sanitizePayments(payload.payments),
+//         isDeleted: false,
+//         isActive: true,
+//       };
+
+//       const [project] = await Project.create(
+//         [sanitizedPayload],
+//         { session },
+//       );
+
+//       createdProject = project;
+
+//       // Update financial account balance
+//       await applyBalanceDiff([], project.payments ?? [], session, {
+//         projectId: project._id,
+//       });
+//     });
+
+
+
+//     // Populate AFTER transaction
+//     const populatedProject =
+//       await Project.findById(createdProject!._id).populate(
+//         populateOptions,
+//       );
+
+//     return {
+//       data: populatedProject,
+//     };
+//   } finally {
+//     await session.endSession();
+//   }
+// };
+
+
+
 const createProject = async (
-  payload: Partial<IProject>,
+  rawPayload: Partial<IProject>,
+  decodedToken?: JwtPayload,
 ) => {
-  console.log(
-    "Payload received in createProject:",
-    payload,
-  );
+  const isManager = decodedToken?.role === Role.MANAGER;
+  // Manager can never set money fields
+  const payload = isManager ? stripFinancialFields(rawPayload) : rawPayload;
 
   // -----------------------------
   // Validation
   // -----------------------------
 
   if (payload.client) {
-    // await assertClientExists(
-    //   payload.client.toString(),
-    //   "Client ID",
-    // );
-    const client = await Client.findById(payload.client);
-
-    if (!client) {
-      throw new AppError(
-        httpStatus.BAD_REQUEST,
-        "Client does not exist.",
-      );
-    }
+    await assertClientExists(payload.client.toString(), "Client ID");
   }
 
   if (payload.projectManager) {
@@ -505,10 +618,7 @@ const createProject = async (
   if (payload.developers?.length) {
     await Promise.all(
       payload.developers.map((developer) =>
-        assertUserExists(
-          developer.toString(),
-          "Developer ID",
-        ),
+        assertUserExists(developer.toString(), "Developer ID"),
       ),
     );
   }
@@ -525,14 +635,8 @@ const createProject = async (
     let createdProject;
 
     await session.withTransaction(async () => {
-      // Priority reorder
       if (payload.priority !== undefined) {
-        await reorderPriority(
-          payload.priority,
-          undefined,
-          undefined,
-          session,
-        );
+        await reorderPriority(payload.priority, undefined, undefined, session);
       }
 
       const sanitizedPayload = {
@@ -542,26 +646,133 @@ const createProject = async (
         isActive: true,
       };
 
-      const [project] = await Project.create(
-        [sanitizedPayload],
-        { session },
-      );
+      const [project] = await Project.create([sanitizedPayload], { session });
 
       createdProject = project;
 
-      // Update financial account balance
+      // No payments for a manager, so this is a no-op for them
       await applyBalanceDiff([], project.payments ?? [], session, {
         projectId: project._id,
       });
     });
 
+    // Populate AFTER transaction (manager gets no money fields back)
+    let query = Project.findById(createdProject!._id);
+    if (isManager) query = query.select(MANAGER_HIDDEN_FIELDS);
 
+    const populatedProject = await query.populate(
+      isManager ? managerPopulateOptions : populateOptions,
+    );
 
-    // Populate AFTER transaction
-    const populatedProject =
-      await Project.findById(createdProject!._id).populate(
-        populateOptions,
+    return {
+      data: populatedProject,
+    };
+  } finally {
+    await session.endSession();
+  }
+};
+
+const updateProject = async (
+  projectId: string,
+  rawPayload: Partial<IProject>,
+  decodedToken?: JwtPayload,
+) => {
+  const isManager = decodedToken?.role === Role.MANAGER;
+  // Manager can never change money fields, existing values stay untouched
+  const payload = isManager ? stripFinancialFields(rawPayload) : rawPayload;
+
+  // -----------------------------
+  // Validation
+  // -----------------------------
+
+  const existingProject = await assertProjectExists(projectId);
+
+  if (payload.client) {
+    await assertClientExists(payload.client.toString(), "Client ID");
+  }
+
+  if (payload.projectManager) {
+    await assertUserExists(
+      payload.projectManager.toString(),
+      "Project manager ID",
+    );
+  }
+
+  if (payload.developers?.length) {
+    await Promise.all(
+      payload.developers.map((developer) =>
+        assertUserExists(developer.toString(), "Developer ID"),
+      ),
+    );
+  }
+
+  if (payload.payments !== undefined) {
+    await validatePayments(
+      payload.payments as IPayment[],
+      existingProject.payments ?? [],
+    );
+  }
+
+  const currentProject =
+    payload.priority !== undefined
+      ? await Project.findById(projectId).select("priority")
+      : null;
+
+  const { isDeleted, deletedAt, deletedBy, ...safePayload } = payload;
+
+  if (safePayload.payments !== undefined) {
+    safePayload.payments = sanitizePayments(safePayload.payments as IPayment[]);
+  }
+
+  // -----------------------------
+  // Transaction
+  // -----------------------------
+
+  const session = await mongoose.startSession();
+
+  try {
+    let updatedProject;
+
+    await session.withTransaction(async () => {
+      if (
+        payload.priority !== undefined &&
+        currentProject?.priority !== payload.priority
+      ) {
+        await reorderPriority(
+          payload.priority,
+          currentProject?.priority,
+          projectId,
+          session,
+        );
+      }
+
+      updatedProject = await Project.findOneAndUpdate(
+        { _id: projectId, isDeleted: false },
+        safePayload,
+        { new: true, runValidators: true, session },
       );
+
+      if (!updatedProject) {
+        throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
+      }
+
+      // payments is stripped for a manager, so balances are never touched
+      if (payload.payments !== undefined) {
+        await applyBalanceDiff(
+          existingProject.payments ?? [],
+          updatedProject.payments ?? [],
+          session,
+          { projectId },
+        );
+      }
+    });
+
+    let query = Project.findById(updatedProject!._id);
+    if (isManager) query = query.select(MANAGER_HIDDEN_FIELDS);
+
+    const populatedProject = await query.populate(
+      isManager ? managerPopulateOptions : populateOptions,
+    );
 
     return {
       data: populatedProject,
@@ -1080,148 +1291,149 @@ const getProjectById = async (
   };
 };
 
-const updateProject = async (
-  projectId: string,
-  payload: Partial<IProject>,
-) => {
-  // -----------------------------
-  // Validation
-  // -----------------------------
+// const updateProject = async (
+//   projectId: string,
+//   payload: Partial<IProject>,
+// ) => {
+//   // -----------------------------
+//   // Validation
+//   // -----------------------------
 
-  const existingProject =
-    await assertProjectExists(projectId);
+//   const existingProject =
+//     await assertProjectExists(projectId);
 
-  if (payload.client) {
-    await assertClientExists(
-      payload.client.toString(),
-      "Client ID",
-    );
-  }
+//   if (payload.client) {
+//     await assertClientExists(
+//       payload.client.toString(),
+//       "Client ID",
+//     );
+//   }
 
-  if (payload.projectManager) {
-    await assertUserExists(
-      payload.projectManager.toString(),
-      "Project manager ID",
-    );
-  }
+//   if (payload.projectManager) {
+//     await assertUserExists(
+//       payload.projectManager.toString(),
+//       "Project manager ID",
+//     );
+//   }
 
-  if (payload.developers?.length) {
-    await Promise.all(
-      payload.developers.map((developer) =>
-        assertUserExists(
-          developer.toString(),
-          "Developer ID",
-        ),
-      ),
-    );
-  }
+//   if (payload.developers?.length) {
+//     await Promise.all(
+//       payload.developers.map((developer) =>
+//         assertUserExists(
+//           developer.toString(),
+//           "Developer ID",
+//         ),
+//       ),
+//     );
+//   }
 
-  // if (payload.payments !== undefined) {
-  //   await validatePayments(
-  //     payload.payments as IPayment[],
-  //   );
-  // }
-  if (payload.payments !== undefined) {
-    await validatePayments(
-      payload.payments as IPayment[],
-      existingProject.payments ?? [],
-    );
-  }
+//   // if (payload.payments !== undefined) {
+//   //   await validatePayments(
+//   //     payload.payments as IPayment[],
+//   //   );
+//   // }
+//   if (payload.payments !== undefined) {
+//     await validatePayments(
+//       payload.payments as IPayment[],
+//       existingProject.payments ?? [],
+//     );
+//   }
 
-  const currentProject =
-    payload.priority !== undefined
-      ? await Project.findById(projectId).select("priority")
-      : null;
+//   const currentProject =
+//     payload.priority !== undefined
+//       ? await Project.findById(projectId).select("priority")
+//       : null;
 
-  const {
-    isDeleted,
-    deletedAt,
-    deletedBy,
-    ...safePayload
-  } = payload;
+//   const {
+//     isDeleted,
+//     deletedAt,
+//     deletedBy,
+//     ...safePayload
+//   } = payload;
 
-  // payments sanitize
-  if (safePayload.payments !== undefined) {
-    safePayload.payments = sanitizePayments(
-      safePayload.payments as IPayment[],
-    );
-  }
+//   // payments sanitize
+//   if (safePayload.payments !== undefined) {
+//     safePayload.payments = sanitizePayments(
+//       safePayload.payments as IPayment[],
+//     );
+//   }
 
 
-  // -----------------------------
-  // Transaction
-  // -----------------------------
+//   // -----------------------------
+//   // Transaction
+//   // -----------------------------
 
-  const session = await mongoose.startSession();
+//   const session = await mongoose.startSession();
 
-  try {
-    let updatedProject;
+//   try {
+//     let updatedProject;
 
-    await session.withTransaction(async () => {
-      // Priority reorder
-      if (
-        payload.priority !== undefined &&
-        currentProject?.priority !== payload.priority
-      ) {
-        await reorderPriority(
-          payload.priority,
-          currentProject?.priority,
-          projectId,
-          session,
-        );
-      }
+//     await session.withTransaction(async () => {
+//       // Priority reorder
+//       if (
+//         payload.priority !== undefined &&
+//         currentProject?.priority !== payload.priority
+//       ) {
+//         await reorderPriority(
+//           payload.priority,
+//           currentProject?.priority,
+//           projectId,
+//           session,
+//         );
+//       }
 
-      // Update project
-      updatedProject =
-        await Project.findOneAndUpdate(
-          {
-            _id: projectId,
-            isDeleted: false,
-          },
-          safePayload,
-          {
-            new: true,
-            runValidators: true,
-            session,
-          },
-        );
+//       // Update project
+//       updatedProject =
+//         await Project.findOneAndUpdate(
+//           {
+//             _id: projectId,
+//             isDeleted: false,
+//           },
+//           safePayload,
+//           {
+//             new: true,
+//             runValidators: true,
+//             session,
+//           },
+//         );
 
-      if (!updatedProject) {
-        throw new AppError(
-          httpStatus.NOT_FOUND,
-          "Project not found.",
-        );
-      }
+//       if (!updatedProject) {
+//         throw new AppError(
+//           httpStatus.NOT_FOUND,
+//           "Project not found.",
+//         );
+//       }
 
-      // Update financial account balance
-      if (payload.payments !== undefined) {
-        // await applyBalanceDiff(
-        //   existingProject.payments ?? [],
-        //   updatedProject.payments ?? [],
-        //   session,
-        // );
-        await applyBalanceDiff(
-          existingProject.payments ?? [],
-          updatedProject.payments ?? [],
-          session,
-          { projectId },
-        );
-      }
-    });
+//       // Update financial account balance
+//       if (payload.payments !== undefined) {
+//         // await applyBalanceDiff(
+//         //   existingProject.payments ?? [],
+//         //   updatedProject.payments ?? [],
+//         //   session,
+//         // );
+//         await applyBalanceDiff(
+//           existingProject.payments ?? [],
+//           updatedProject.payments ?? [],
+//           session,
+//           { projectId },
+//         );
+//       }
+//     });
 
-    // Populate AFTER transaction
-    const populatedProject =
-      await Project.findById(
-        updatedProject!._id,
-      ).populate(populateOptions);
+//     // Populate AFTER transaction
+//     const populatedProject =
+//       await Project.findById(
+//         updatedProject!._id,
+//       ).populate(populateOptions);
 
-    return {
-      data: populatedProject,
-    };
-  } finally {
-    await session.endSession();
-  }
-};
+//     return {
+//       data: populatedProject,
+//     };
+//   } finally {
+//     await session.endSession();
+//   }
+// };
+
 
 /**
  * Soft Delete / Move To Trash

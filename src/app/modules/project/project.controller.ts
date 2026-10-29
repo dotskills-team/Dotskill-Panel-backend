@@ -8,19 +8,35 @@ import { sendResponse } from "../../utils/sendResponse";
 import { catchAsync } from "../../utils/catchAsync";
 
 const createProject = catchAsync(
-    async (
-        req: Request,
-        res: Response,
-        _next: NextFunction,
-    ) => {
+    async (req: Request, res: Response, _next: NextFunction) => {
         const result = await ProjectServices.createProject(
             req.body as Partial<IProject>,
+            req.user as JwtPayload,
         );
 
         sendResponse(res, {
             statusCode: httpStatus.CREATED,
             success: true,
             message: "Project created successfully.",
+            data: result.data,
+        });
+    },
+);
+
+const updateProject = catchAsync(
+    async (req: Request, res: Response, _next: NextFunction) => {
+        const projectId = req.params.id as string;
+
+        const result = await ProjectServices.updateProject(
+            projectId,
+            req.body as Partial<IProject>,
+            req.user as JwtPayload,
+        );
+
+        sendResponse(res, {
+            statusCode: httpStatus.OK,
+            success: true,
+            message: "Project updated successfully.",
             data: result.data,
         });
     },
@@ -80,29 +96,27 @@ const getDeletedProjects = catchAsync(
     },
 );
 
+// const updateProject = catchAsync(
+//     async (
+//         req: Request,
+//         res: Response,
+//         _next: NextFunction,
+//     ) => {
+//         const projectId = req.params.id as string;
 
+//         const result = await ProjectServices.updateProject(
+//             projectId,
+//             req.body as Partial<IProject>,
+//         );
 
-const updateProject = catchAsync(
-    async (
-        req: Request,
-        res: Response,
-        _next: NextFunction,
-    ) => {
-        const projectId = req.params.id as string;
-
-        const result = await ProjectServices.updateProject(
-            projectId,
-            req.body as Partial<IProject>,
-        );
-
-        sendResponse(res, {
-            statusCode: httpStatus.OK,
-            success: true,
-            message: "Project updated successfully.",
-            data: result.data,
-        });
-    },
-);
+//         sendResponse(res, {
+//             statusCode: httpStatus.OK,
+//             success: true,
+//             message: "Project updated successfully.",
+//             data: result.data,
+//         });
+//     },
+// );
 
 const softDeleteProject = catchAsync(
     async (
