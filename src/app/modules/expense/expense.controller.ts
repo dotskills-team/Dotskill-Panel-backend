@@ -4,6 +4,7 @@ import { StatusCodes } from "http-status-codes";
 import { ExpenseService } from "./expense.service";
 import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
+import { FinanceActor } from "../../utils/financeScope";
 
 const createExpense = catchAsync(async (req, res) => {
   const payload = { ...req.body };
@@ -11,7 +12,7 @@ const createExpense = catchAsync(async (req, res) => {
     payload.attachment = req.file.path;
   }
 
-  const result = await ExpenseService.createExpense(payload, req.user.userId);
+  const result = await ExpenseService.createExpense(payload, req.user as FinanceActor);
 
   sendResponse(res, {
     statusCode: StatusCodes.CREATED,
@@ -22,7 +23,7 @@ const createExpense = catchAsync(async (req, res) => {
 });
 
 const getAllExpenses = catchAsync(async (req, res) => {
-  const { result, meta } = await ExpenseService.getAllExpenses(req.query);
+  const { result, meta } = await ExpenseService.getAllExpenses(req.query, req.user as FinanceActor);
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -39,12 +40,26 @@ const getSingleExpense = catchAsync(async (req, res) => {
 if (typeof id !== "string") {
   throw new Error("Invalid expense ID");
 }
-  const result = await ExpenseService.getSingleExpense(id);
+  const result = await ExpenseService.getSingleExpense(id, req.user as FinanceActor);
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
     success: true,
     message: "Expense retrieved successfully",
+    data: result,
+  });
+});
+
+const getExpenseSummary = catchAsync(async (req, res) => {
+  const result = await ExpenseService.getExpenseSummary(
+    req.query as Record<string, unknown>,
+    req.user as FinanceActor,
+  );
+
+  sendResponse(res, {
+    statusCode: StatusCodes.OK,
+    success: true,
+    message: "Expense summary retrieved successfully",
     data: result,
   });
 });
@@ -61,11 +76,7 @@ if (typeof id !== "string") {
   throw new Error("Invalid expense ID");
 }
 
-  const result = await ExpenseService.updateExpense(
-    id,
-    payload,
-    req.user.userId,
-  );
+  const result = await ExpenseService.updateExpense(id, payload, req.user as FinanceActor);
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,
@@ -95,6 +106,7 @@ export const ExpenseController = {
   createExpense,
   getAllExpenses,
   getSingleExpense,
+  getExpenseSummary,
   updateExpense,
   deleteExpense,
 };

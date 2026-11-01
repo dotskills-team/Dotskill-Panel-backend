@@ -7,6 +7,8 @@ import {
   TRANSACTION_TYPE,
 } from "./transaction.constant";
 import { FinancialAccount } from "../financial-account/financial-account.model";
+import { FinancialAccountService } from "../financial-account/financial-account.service";
+import { FinanceActor } from "../../utils/financeScope";
 
 const deposit = async (
   payload: { accountId: string; amount: number; date: string; note?: string },
@@ -33,8 +35,15 @@ const deposit = async (
   return FinancialAccount.findById(payload.accountId);
 };
 
-const getAllTransactions = async (query: Record<string, unknown>) => {
-  const baseQuery = Transaction.find({})
+const getAllTransactions = async (
+  query: Record<string, unknown>,
+  actor: FinanceActor,
+) => {
+  // Only transactions on the caller's own accounts. $and keeps this even if the query tries to override accountId.
+  const ownedIds = await FinancialAccountService.getOwnedAccountIds(actor);
+  const baseQuery = Transaction.find({
+    $and: [{ accountId: { $in: ownedIds } }],
+  })
     .populate("accountId", "accountName accountType")
     .populate("createdBy", "firstName lastName");
 

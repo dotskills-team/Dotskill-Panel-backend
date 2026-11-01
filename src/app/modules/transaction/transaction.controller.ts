@@ -2,6 +2,7 @@ import { StatusCodes } from "http-status-codes";
 import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
 import { TransactionService } from "./transaction.service";
+import { FinanceActor } from "../../utils/financeScope";
 
 const deposit = catchAsync(async (req, res) => {
   const result = await TransactionService.deposit(req.body, req.user.userId);
@@ -16,6 +17,7 @@ const deposit = catchAsync(async (req, res) => {
 const getAllTransactions = catchAsync(async (req, res) => {
   const { result, meta } = await TransactionService.getAllTransactions(
     req.query,
+    req.user as FinanceActor,
   );
   sendResponse(res, {
     statusCode: StatusCodes.OK,

@@ -28,11 +28,12 @@ router.get(
   FinancialAccountController.getAllPayments,
 );
 
-router.get("/", checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER), FinancialAccountController.getAllFinancialAccounts);
+// Every logged-in role can read accounts; the service limits non-admins to the accounts they own.
+router.get("/", checkAuth(...Object.values(Role)), FinancialAccountController.getAllFinancialAccounts);
 
 router.get(
   "/:id",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER),
+  checkAuth(...Object.values(Role)),
   FinancialAccountController.getSingleFinancialAccount,
 );
 

@@ -16,6 +16,9 @@ app.use(cors({
      origin: [
         envVars.FRONTEND_URL,
         "http://localhost:3000",
+        "https://dotskills-panel-frontend-blush.vercel.app",
+        "https://dotskill-panel.vercel.app",
+        "https://dotskills-panel-frontend1.onrender.com",
     ],
     credentials: true
 }))
