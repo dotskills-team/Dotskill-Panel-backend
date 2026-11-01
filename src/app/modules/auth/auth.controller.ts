@@ -5,7 +5,7 @@ import { catchAsync } from "../../utils/catchAsync";
 import { AuthServices } from "./auth.service";
 import { sendResponse } from "../../utils/sendResponse";
 import AppError from "../../errorHelpers/appError";
-import { setAuthCookie } from "../../utils/setCookie";
+import { clearAuthCookie, setAuthCookie } from "../../utils/setCookie";
 import { JwtPayload } from "jsonwebtoken";
 
 const credentialLogin = catchAsync(
@@ -84,17 +84,7 @@ const getNewAccessToken = catchAsync(
 
 const logout = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    res.clearCookie("accessToken", {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
-    });
-
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
-    });
+    clearAuthCookie(res);
 
     sendResponse(res, {
       statusCode: httpStatus.OK,
@@ -102,6 +92,7 @@ const logout = catchAsync(
       message: "Logout Successfully",
       data: null,
     });
+
   },
 );
 

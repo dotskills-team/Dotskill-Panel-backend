@@ -7,6 +7,7 @@ import { FINANCIAL_ACCOUNT_SEARCHABLE_FIELDS } from "./financial-account.constan
 import { User } from "../user/user.model";
 import { Project } from "../project/project.model";
 import { Loan } from "../loan/loan.model";
+import { FinanceActor } from "../../utils/financeScope";
 // const createFinancialAccount = async (
 //   payload: Partial<IFinancialAccount>,
 //   userId: string,
@@ -41,9 +42,26 @@ const createFinancialAccount = async (
   return result;
 };
 
-const getAllFinancialAccounts = async (query: Record<string, unknown>) => {
-  // const baseQuery = FinancialAccount.find({ isDeleted: false });
-  const baseQuery = FinancialAccount.find({ isDeleted: false }).populate(ownerPopulate);
+// Every user (admins included) only sees the accounts they own.
+const accountScope = (actor: FinanceActor) => ({ ownerId: actor.userId });
+
+/** IDs of the accounts owned by the caller. Used to scope transactions and loans. */
+const getOwnedAccountIds = async (actor: FinanceActor) => {
+  const ids = await FinancialAccount.distinct("_id", {
+    isDeleted: false,
+    ...accountScope(actor),
+  });
+  return ids as Types.ObjectId[];
+};
+
+const getAllFinancialAccounts = async (
+  query: Record<string, unknown>,
+  actor: FinanceActor,
+) => {
+  // $and keeps the ownership condition even if the query string tries to override ownerId.
+  const baseQuery = FinancialAccount.find({
+    $and: [{ isDeleted: false }, accountScope(actor)],
+  }).populate(ownerPopulate);
 
 
   const queryBuilder = new QueryBuilder(baseQuery, query as Record<string, string>)
@@ -59,9 +77,13 @@ const getAllFinancialAccounts = async (query: Record<string, unknown>) => {
   return { result, meta };
 };
 
-const getSingleFinancialAccount = async (id: string) => {
+const getSingleFinancialAccount = async (id: string, actor: FinanceActor) => {
   // const account = await FinancialAccount.findOne({ _id: id, isDeleted: false });
- const account = await FinancialAccount.findOne({ _id: id, isDeleted: false }).populate(ownerPopulate);
+ const account = await FinancialAccount.findOne({
+    _id: id,
+    isDeleted: false,
+    ...accountScope(actor),
+  }).populate(ownerPopulate);
  
   
   if (!account) {
@@ -70,8 +92,11 @@ const getSingleFinancialAccount = async (id: string) => {
   return account;
 };
 
-const getFinancialAccountSummary = async () => {
-  const accounts = await FinancialAccount.find({ isDeleted: false }).populate(ownerPopulate);
+const getFinancialAccountSummary = async (actor: FinanceActor) => {
+  const accounts = await FinancialAccount.find({
+    isDeleted: false,
+    ...accountScope(actor),
+  }).populate(ownerPopulate);
 
   const totalOpeningBalance = accounts.reduce((sum, acc) => sum + acc.openingBalance, 0);
   const totalCurrentBalance = accounts.reduce((sum, acc) => sum + acc.currentBalance, 0);
@@ -103,7 +128,10 @@ const ownerMap = new Map<
     existing.totalBalance += acc.currentBalance;
     ownerMap.set(key, existing);
   }
+  // Only loans received into the caller's own accounts.
+  const ownedIds = accounts.map((acc) => acc._id);
   const [loanAgg] = await Loan.aggregate([
+    { $match: { receivedAccountId: { $in: ownedIds } } },
     { $group: { _id: null, totalDue: { $sum: "$dueAmount" } } },
   ]);
   return {
@@ -346,6 +374,7 @@ const deleteFinancialAccount = async (id: string, userId: string) => {
 
 
 export const FinancialAccountService = {
+  getOwnedAccountIds,
   createFinancialAccount,
   getAllFinancialAccounts,
   getSingleFinancialAccount,

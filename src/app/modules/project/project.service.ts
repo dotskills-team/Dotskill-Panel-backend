@@ -1643,10 +1643,13 @@ const permanentlyDeleteProject = async (
   projectId: string,
   decodedToken: JwtPayload,
 ) => {
-  if (decodedToken.role !== Role.SUPER_ADMIN) {
+  // Must match the route's checkAuth roles and the frontend trash page check
+  const PERMANENT_DELETE_ROLES: string[] = [Role.SUPER_ADMIN, Role.ADMIN];
+
+  if (!PERMANENT_DELETE_ROLES.includes(decodedToken.role)) {
     throw new AppError(
       httpStatus.FORBIDDEN,
-      "Only a Super Admin can permanently delete a project.",
+      "Only a Super Admin or Admin can permanently delete a project.",
     );
   }
 

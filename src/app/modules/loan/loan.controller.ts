@@ -1,6 +1,7 @@
 import { StatusCodes } from "http-status-codes";
 import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
+import { FinanceActor } from "../../utils/financeScope";
 import { LoanService } from "./loan.service";
 
 const createLoan = catchAsync(async (req, res) => {
@@ -28,7 +29,7 @@ const repayLoan = catchAsync(async (req, res) => {
 });
 
 const getAllLoans = catchAsync(async (req, res) => {
-  const { result, meta } = await LoanService.getAllLoans(req.query);
+  const { result, meta } = await LoanService.getAllLoans(req.query, req.user as FinanceActor);
   sendResponse(res, {
     statusCode: StatusCodes.OK,
     success: true,
@@ -38,8 +39,8 @@ const getAllLoans = catchAsync(async (req, res) => {
   });
 });
 
-const getLoanSummary = catchAsync(async (_req, res) => {
-  const result = await LoanService.getLoanSummary();
+const getLoanSummary = catchAsync(async (req, res) => {
+  const result = await LoanService.getLoanSummary(req.user as FinanceActor);
   sendResponse(res, {
     statusCode: StatusCodes.OK,
     success: true,

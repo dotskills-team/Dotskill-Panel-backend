@@ -4,6 +4,7 @@ import { StatusCodes } from "http-status-codes";
 import { FinancialAccountService } from "./financial-account.service";
 import { catchAsync } from "../../utils/catchAsync";
 import { sendResponse } from "../../utils/sendResponse";
+import { FinanceActor } from "../../utils/financeScope";
 
 const createFinancialAccount = catchAsync(async (req, res) => {
   const result = await FinancialAccountService.createFinancialAccount(
@@ -22,6 +23,7 @@ const createFinancialAccount = catchAsync(async (req, res) => {
 const getAllFinancialAccounts = catchAsync(async (req, res) => {
   const { result, meta } = await FinancialAccountService.getAllFinancialAccounts(
     req.query,
+    req.user as FinanceActor,
   );
 
   sendResponse(res, {
@@ -41,6 +43,7 @@ if (typeof id !== "string") {
 }
   const result = await FinancialAccountService.getSingleFinancialAccount(
     id,
+    req.user as FinanceActor,
   );
 
   sendResponse(res, {
@@ -51,7 +54,9 @@ if (typeof id !== "string") {
   });
 });
 const getFinancialAccountSummary = catchAsync(async (req, res) => {
-  const result = await FinancialAccountService.getFinancialAccountSummary();
+  const result = await FinancialAccountService.getFinancialAccountSummary(
+    req.user as FinanceActor,
+  );
 
   sendResponse(res, {
     statusCode: StatusCodes.OK,

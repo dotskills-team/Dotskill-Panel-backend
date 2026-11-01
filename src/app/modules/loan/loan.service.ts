@@ -4,6 +4,8 @@ import { QueryBuilder } from "../../utils/QueryBuilder";
 import { Loan } from "./loan.model";
 import { applyAccountChange } from "../transaction/ledger.service";
 import { TRANSACTION_TYPE } from "../transaction/transaction.constant";
+import { FinancialAccountService } from "../financial-account/financial-account.service";
+import { FinanceActor } from "../../utils/financeScope";
 
 const populateOptions = [
   { path: "receivedAccountId", select: "accountName accountType" },
@@ -114,8 +116,12 @@ const repayLoan = async (
   }
 };
 
-const getAllLoans = async (query: Record<string, unknown>) => {
-  const baseQuery = Loan.find({}).populate(populateOptions);
+// Loans are shown only when they were received into one of the caller's own accounts.
+const getAllLoans = async (query: Record<string, unknown>, actor: FinanceActor) => {
+  const ownedIds = await FinancialAccountService.getOwnedAccountIds(actor);
+  const baseQuery = Loan.find({
+    $and: [{ receivedAccountId: { $in: ownedIds } }],
+  }).populate(populateOptions);
 
   const queryBuilder = new QueryBuilder(
     baseQuery,
@@ -132,8 +138,10 @@ const getAllLoans = async (query: Record<string, unknown>) => {
   return { result, meta };
 };
 
-const getLoanSummary = async () => {
+const getLoanSummary = async (actor: FinanceActor) => {
+  const ownedIds = await FinancialAccountService.getOwnedAccountIds(actor);
   const [s] = await Loan.aggregate([
+    { $match: { receivedAccountId: { $in: ownedIds } } },
     {
       $group: {
         _id: null,

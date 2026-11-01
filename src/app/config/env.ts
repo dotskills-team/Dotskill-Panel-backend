@@ -27,6 +27,8 @@ interface EnvConfig {
   };
   COMPANY_EMAIL: string;
   FRONTEND_URL: string;
+  /** Optional. Only set when frontend and backend share a parent domain (e.g. ".dotskills.com"). */
+  COOKIE_DOMAIN?: string;
 }
 
 const loadEnvVariables = (): EnvConfig => {
@@ -85,6 +87,7 @@ const loadEnvVariables = (): EnvConfig => {
     },
     COMPANY_EMAIL: process.env.COMPANY_EMAIL as string,
     FRONTEND_URL: process.env.FRONTEND_URL as string,
+    COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
   };
 };
 
