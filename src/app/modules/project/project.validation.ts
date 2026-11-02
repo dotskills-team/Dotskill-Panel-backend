@@ -1,10 +1,16 @@
 
 import { z } from "zod";
-import { ProjectStatus, ProjectType, PaymentStatus } from "./project.interface";
+import {
+  ProjectStatus,
+  ProjectType,
+  PaymentStatus,
+  PaymentCategory,
+} from "./project.interface";
 
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 const projectStatusValues = Object.values(ProjectStatus) as [ProjectStatus, ...ProjectStatus[]];
 const paymentStatusValues = Object.values(PaymentStatus) as [PaymentStatus, ...PaymentStatus[]];
+const paymentCategoryValues = Object.values(PaymentCategory) as [PaymentCategory, ...PaymentCategory[]];
 
 const paymentValidationSchema = z.object({
   amount: z
@@ -24,8 +30,18 @@ const paymentValidationSchema = z.object({
     .trim()
     .optional(),
 
-      financialAccountId: z
+  financialAccountId: z
     .string()
+    .optional(),
+
+  isAdvance: z
+    .boolean()
+    .optional(),
+
+  category: z
+    .enum(paymentCategoryValues, {
+      errorMap: () => ({ message: "Invalid payment category" }),
+    })
     .optional(),
 });
 
@@ -122,12 +138,8 @@ export const createProjectValidationSchema = z.object({
     .optional()
     .default(ProjectStatus.PLANNING),
 
-  paymentStatus: z
-    .enum(paymentStatusValues, {
-      errorMap: () => ({ message: "Invalid payment status" }),
-    })
-    .optional()
-    .default(PaymentStatus.DUE),
+  // Derived on the server and always recalculated; any value sent here is ignored
+  paymentStatus: z.string().optional(),
 
   payments: z
     .array(paymentValidationSchema)

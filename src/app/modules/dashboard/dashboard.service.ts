@@ -3,6 +3,7 @@ import { FinanceActor } from "../../utils/financeScope";
 import { Role } from "../user/user.interface";
 import { User } from "../user/user.model";
 import { Project } from "../project/project.model";
+import { isReceivedPayment } from "../project/project.payment.utils";
 import { Lead } from "../lead/lead.model";
 import { Client } from "../clients/client.model";
 import { Expense } from "../expense/expense.model";
@@ -222,7 +223,7 @@ interface ProjectLite {
   client?: unknown;
   developers: Types.ObjectId[];
   projectManager: Types.ObjectId;
-  payments: { amount: number; date: Date; note?: string }[];
+  payments: { amount: number; date: Date; note?: string; status?: string }[];
 }
 
 const loadProjects = async (match: Record<string, unknown>) => {
@@ -233,8 +234,11 @@ const loadProjects = async (match: Record<string, unknown>) => {
   return rows as unknown as ProjectLite[];
 };
 
+// Received = COMPLETE + ADVANCED lines (same rule as project totals)
+const receivedPayments = (p: ProjectLite) => (p.payments ?? []).filter(isReceivedPayment);
+
 const paidOf = (p: ProjectLite) =>
-  (p.payments ?? []).reduce((sum, pay) => sum + (pay.amount ?? 0), 0);
+  receivedPayments(p).reduce((sum, pay) => sum + (pay.amount ?? 0), 0);
 
 /** Money owed on a project: budget minus everything paid so far. */
 const dueOf = (p: ProjectLite) => Math.max(0, (p.budget ?? 0) - paidOf(p));
@@ -245,7 +249,7 @@ const isActive = (p: ProjectLite) => ACTIVE_PROJECT_STATUSES.includes(p.status);
 const collectedByMonth = (projects: ProjectLite[], range: DashboardRange) => {
   const map = new Map<string, number>();
   for (const p of projects) {
-    for (const pay of p.payments ?? []) {
+    for (const pay of receivedPayments(p)) {
       if (!inRange(pay.date, range)) continue;
       const d = new Date(pay.date);
       const key = monthKey(d.getUTCFullYear(), d.getUTCMonth() + 1);
@@ -259,7 +263,7 @@ const collectedBetween = (projects: ProjectLite[], range: DashboardRange) =>
   projects.reduce(
     (sum, p) =>
       sum +
-      (p.payments ?? [])
+      receivedPayments(p)
         .filter((pay) => inRange(pay.date, range))
         .reduce((s, pay) => s + (pay.amount ?? 0), 0),
     0,
@@ -268,7 +272,7 @@ const collectedBetween = (projects: ProjectLite[], range: DashboardRange) =>
 const recentPayments = (projects: ProjectLite[], range: DashboardRange, limit: number): DashboardListRow[] =>
   projects
     .flatMap((p) =>
-      (p.payments ?? [])
+      receivedPayments(p)
         .filter((pay) => inRange(pay.date, range))
         .map((pay) => ({
           primary: p.name,

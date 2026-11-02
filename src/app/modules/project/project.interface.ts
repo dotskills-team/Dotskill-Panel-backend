@@ -38,6 +38,19 @@ export enum PaymentStatus {
     COMPLETE = "COMPLETE",
 }
 
+// Derived per project from its payments (never typed in by hand)
+export enum ProjectPaymentState {
+    DUE = "DUE",
+    PARTIAL = "PARTIAL",
+    PAID = "PAID",
+    NO_BUDGET = "NO_BUDGET",
+}
+
+export enum PaymentCategory {
+    PROJECT = "PROJECT",
+    MAINTENANCE = "MAINTENANCE",
+}
+
 export interface IPayment {
     _id?: Types.ObjectId;
     amount: number;
@@ -45,6 +58,8 @@ export interface IPayment {
     status: PaymentStatus;
     note?: string;
      financialAccountId?: Types.ObjectId; //new
+    isAdvance?: boolean;
+    category?: PaymentCategory;
 }
 
 export interface IProjectDocument {
@@ -85,7 +100,11 @@ export interface IProject {
 
     status: ProjectStatus;
 
-    paymentStatus?: PaymentStatus;
+    paymentStatus?: ProjectPaymentState;
+    receivedAmount?: number;
+    outstandingAmount?: number;
+    overpaidAmount?: number;
+    hasAdvance?: boolean;
     payments?: IPayment[];
     paymentSchedule?: IPaymentInstallment[];
     nextPaymentDate?: Date;

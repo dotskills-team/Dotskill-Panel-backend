@@ -4,8 +4,12 @@ import { JwtPayload } from "jsonwebtoken";
 import { sendMail } from "../../utils/mailer";
 import AppError from "../../errorHelpers/appError";
 import { User } from "../user/user.model";
-import { IPayment, IProject, PaymentStatus } from "./project.interface";
+import { IPayment, IProject, PaymentStatus, ProjectPaymentState } from "./project.interface";
 import { Project } from "./project.model";
+import {
+  computePaymentSummary,
+  RECEIVED_PAYMENT_STATUSES,
+} from "./project.payment.utils";
 import { QueryBuilder } from "../../utils/QueryBuilder";
 import { projectSearchableFields } from "./project.constants";
 import { Client } from "../clients/client.model";
@@ -231,7 +235,7 @@ const developerPopulateOptions = [
 
 // Fields a manager must never receive
 const MANAGER_HIDDEN_FIELDS =
-  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed";
+  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -receivedAmount -outstandingAmount -overpaidAmount -hasAdvance";
 
 // Query keys a manager must not use to probe money data
 const MANAGER_BLOCKED_QUERY_KEYS = [
@@ -241,6 +245,10 @@ const MANAGER_BLOCKED_QUERY_KEYS = [
   "paymentStatus",
   "nextPaymentDate",
   "balanceReversed",
+  "receivedAmount",
+  "outstandingAmount",
+  "overpaidAmount",
+  "hasAdvance",
   "fields",
 ];
 
@@ -251,7 +259,7 @@ const managerPopulateOptions = populateOptions.filter(
 
 // Hide money-related fields from developers
 const DEVELOPER_HIDDEN_FIELDS =
-  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -deletedBy -deletedAt";
+  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -receivedAmount -outstandingAmount -overpaidAmount -hasAdvance -deletedBy -deletedAt";
 
 
 
@@ -263,7 +271,37 @@ const FINANCIAL_PAYLOAD_KEYS = [
   "paymentStatus",
   "nextPaymentDate",
   "balanceReversed",
+  "receivedAmount",
+  "outstandingAmount",
+  "overpaidAmount",
+  "hasAdvance",
 ];
+
+// Payment filter values sent by the UI that are not stored states
+const PAYMENT_FILTER_OUTSTANDING = "OUTSTANDING";
+const PAYMENT_FILTER_ADVANCE = "ADVANCE";
+
+/**
+ * Turns the UI payment filter into a database condition.
+ * Stored states (DUE, PARTIAL, PAID, NO_BUDGET) pass through as-is.
+ */
+const extractPaymentFilter = (query: Record<string, string>): Record<string, unknown> => {
+  const value = query.paymentStatus;
+
+  if (value === PAYMENT_FILTER_OUTSTANDING) {
+    delete query.paymentStatus;
+    return {
+      paymentStatus: { $in: [ProjectPaymentState.DUE, ProjectPaymentState.PARTIAL] },
+    };
+  }
+
+  if (value === PAYMENT_FILTER_ADVANCE) {
+    delete query.paymentStatus;
+    return { hasAdvance: true };
+  }
+
+  return {};
+};
 
 const stripFinancialFields = (payload: Partial<IProject>): Partial<IProject> => {
   const copy: Record<string, unknown> = { ...payload };
@@ -639,9 +677,13 @@ const createProject = async (
         await reorderPriority(payload.priority, undefined, undefined, session);
       }
 
+      const cleanPayments = sanitizePayments(payload.payments);
+
       const sanitizedPayload = {
         ...payload,
-        payments: sanitizePayments(payload.payments),
+        payments: cleanPayments,
+        // Payment figures are always derived from the payments and budget
+        ...computePaymentSummary(cleanPayments ?? [], payload.budget),
         isDeleted: false,
         isActive: true,
       };
@@ -718,7 +760,14 @@ const updateProject = async (
       ? await Project.findById(projectId).select("priority")
       : null;
 
-  const { isDeleted, deletedAt, deletedBy, ...safePayload } = payload;
+  // paymentStatus and the summary fields are derived below, never taken from the client
+  const {
+    isDeleted,
+    deletedAt,
+    deletedBy,
+    paymentStatus: _ignoredPaymentStatus,
+    ...safePayload
+  } = payload;
 
   if (safePayload.payments !== undefined) {
     safePayload.payments = sanitizePayments(safePayload.payments as IPayment[]);
@@ -765,6 +814,18 @@ const updateProject = async (
           { projectId },
         );
       }
+
+      // Recalculate payment state from the saved payments and budget
+      await Project.updateOne(
+        { _id: projectId },
+        {
+          $set: computePaymentSummary(
+            updatedProject.payments ?? [],
+            updatedProject.budget,
+          ),
+        },
+        { session },
+      );
     });
 
     let query = Project.findById(updatedProject!._id);
@@ -801,18 +862,21 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
             },
           },
         ],
+        // Same rules as computePaymentSummary: received = COMPLETE + ADVANCED,
+        // outstanding and overpaid are calculated per project, then summed.
         amounts: [
           {
             $project: {
               budget: { $ifNull: ["$budget", 0] },
-              paid: {
+              hasBudget: { $gt: [{ $ifNull: ["$budget", 0] }, 0] },
+              received: {
                 $sum: {
                   $map: {
                     input: {
                       $filter: {
                         input: { $ifNull: ["$payments", []] },
                         as: "p",
-                        cond: { $eq: ["$$p.status", "COMPLETE"] },
+                        cond: { $in: ["$$p.status", RECEIVED_PAYMENT_STATUSES] },
                       },
                     },
                     as: "p",
@@ -823,15 +887,33 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
             },
           },
           {
+            $project: {
+              budget: 1,
+              hasBudget: 1,
+              received: 1,
+              outstanding: {
+                $cond: [
+                  "$hasBudget",
+                  { $max: [0, { $subtract: ["$budget", "$received"] }] },
+                  0,
+                ],
+              },
+              overpaid: {
+                $cond: [
+                  "$hasBudget",
+                  { $max: [0, { $subtract: ["$received", "$budget"] }] },
+                  0,
+                ],
+              },
+            },
+          },
+          {
             $group: {
               _id: null,
               totalValue: { $sum: "$budget" },
-              totalPaid: { $sum: "$paid" },
-              totalDue: {
-                $sum: {
-                  $subtract: ["$budget", "$paid"],
-                },
-              },
+              totalPaid: { $sum: "$received" },
+              totalDue: { $sum: "$outstanding" },
+              totalOverpaid: { $sum: "$overpaid" },
             },
           },
         ],
@@ -850,6 +932,7 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
     totalValue: agg?.amounts?.[0]?.totalValue ?? 0,
     totalPaid: agg?.amounts?.[0]?.totalPaid ?? 0,
     totalDue: agg?.amounts?.[0]?.totalDue ?? 0,
+    totalOverpaid: agg?.amounts?.[0]?.totalOverpaid ?? 0,
   };
 
   (agg?.byStatus ?? []).forEach(
@@ -1016,9 +1099,13 @@ const getProjects = async (
     cleanQuery.sort = "-startDate";
   }
 
+  // OUTSTANDING / ADVANCE become conditions here, so list and stats share them
+  const paymentFilter = extractPaymentFilter(cleanQuery);
+
   const baseFilter: Record<string, any> = {
     isDeleted: false,
     ...dateFilterObj,
+    ...paymentFilter,
   };
 
   const queryBuilder = new QueryBuilder(
