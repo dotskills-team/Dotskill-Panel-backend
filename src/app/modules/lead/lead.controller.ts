@@ -224,6 +224,46 @@ const addNote = catchAsync(
   },
 );
 
+const updateNote = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const leadId = req.params.id as string;
+    const noteId = req.params.noteId as string;
+    const decodedToken = req.user as JwtPayload;
+    const { message } = req.body as { message: string };
+
+    const result = await LeadServices.updateNote(
+      leadId,
+      noteId,
+      message,
+      decodedToken,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Note updated successfully.",
+      data: result.data,
+    });
+  },
+);
+
+const deleteNote = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const leadId = req.params.id as string;
+    const noteId = req.params.noteId as string;
+    const decodedToken = req.user as JwtPayload;
+
+    const result = await LeadServices.deleteNote(leadId, noteId, decodedToken);
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Note deleted successfully.",
+      data: result.data,
+    });
+  },
+);
+
 const addAttachment = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const leadId = req.params.id as string;
@@ -331,6 +371,8 @@ export const LeadControllers = {
   updateLeadContactStatus,
   assignLead,
   addNote,
+  updateNote,
+  deleteNote,
   addAttachment,
   convertLead,
   softDeleteLead,

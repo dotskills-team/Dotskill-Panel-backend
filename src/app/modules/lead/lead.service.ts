@@ -742,6 +742,57 @@ const addNote = async (
   return { data: updatedLead };
 };
 
+const updateNote = async (
+  leadId: string,
+  noteId: string,
+  message: string,
+  decodedToken: JwtPayload,
+) => {
+  await assertLeadExists(leadId);
+  assertValidObjectId(noteId, "Note id");
+
+  const updatedLead = await Lead.findOneAndUpdate(
+    { _id: leadId, "notes._id": toObjectId(noteId) },
+    {
+      $set: {
+        "notes.$.message": message,
+        updatedBy: toObjectId(decodedToken.userId),
+      },
+    },
+    { new: true, runValidators: true },
+  ).populate(populateOptions);
+
+  if (!updatedLead) {
+    throw new AppError(httpStatus.NOT_FOUND, "Note not found.");
+  }
+
+  return { data: updatedLead };
+};
+
+const deleteNote = async (
+  leadId: string,
+  noteId: string,
+  decodedToken: JwtPayload,
+) => {
+  await assertLeadExists(leadId);
+  assertValidObjectId(noteId, "Note id");
+
+  const updatedLead = await Lead.findOneAndUpdate(
+    { _id: leadId, "notes._id": toObjectId(noteId) },
+    {
+      $pull: { notes: { _id: toObjectId(noteId) } },
+      updatedBy: toObjectId(decodedToken.userId),
+    },
+    { new: true },
+  ).populate(populateOptions);
+
+  if (!updatedLead) {
+    throw new AppError(httpStatus.NOT_FOUND, "Note not found.");
+  }
+
+  return { data: updatedLead };
+};
+
 const convertLead = async (
   leadId: string,
   payload: any,
@@ -1029,6 +1080,8 @@ export const LeadServices = {
   updateLeadContactStatus,
   assignLead,
   addNote,
+  updateNote,
+  deleteNote,
   addAttachment,
   convertLead,
   softDeleteLead,

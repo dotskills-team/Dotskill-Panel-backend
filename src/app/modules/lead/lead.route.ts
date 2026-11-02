@@ -82,6 +82,19 @@ router.post(
   LeadControllers.addNote,
 );
 
+router.patch(
+  "/:id/notes/:noteId",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  validateRequest(addNoteValidationSchema),
+  LeadControllers.updateNote,
+);
+
+router.delete(
+  "/:id/notes/:noteId",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  LeadControllers.deleteNote,
+);
+
 router.post(
   "/:id/attachments",
   checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
