@@ -9,6 +9,8 @@ import {
     ProjectStatus,
     ProjectType,
     PaymentStatus,
+    PaymentCategory,
+    ProjectPaymentState,
 } from "./project.interface";
 
 const paymentSchema = new Schema<IPayment>(
@@ -36,6 +38,17 @@ const paymentSchema = new Schema<IPayment>(
             type: Schema.Types.ObjectId,
             ref: "FinancialAccount",
             default: null, // ⬅️ new
+        },
+
+        isAdvance: {
+            type: Boolean,
+            default: false,
+        },
+
+        category: {
+            type: String,
+            enum: Object.values(PaymentCategory),
+            default: PaymentCategory.PROJECT,
         },
 
     },
@@ -156,11 +169,17 @@ const projectSchema = new Schema<IProject>(
             default: ProjectStatus.PLANNING,
         },
 
+        // Derived by the server on every write (see project.payment.utils.ts)
         paymentStatus: {
             type: String,
-            enum: Object.values(PaymentStatus),
-            default: PaymentStatus.DUE,
+            enum: Object.values(ProjectPaymentState),
+            default: ProjectPaymentState.DUE,
         },
+
+        receivedAmount: { type: Number, default: 0 },
+        outstandingAmount: { type: Number, default: 0 },
+        overpaidAmount: { type: Number, default: 0 },
+        hasAdvance: { type: Boolean, default: false },
 
         payments: {
             type: [paymentSchema],
