@@ -29,6 +29,14 @@ interface EnvConfig {
   FRONTEND_URL: string;
   /** Optional. Only set when frontend and backend share a parent domain (e.g. ".dotskills.com"). */
   COOKIE_DOMAIN?: string;
+  /** 64 hex characters (32 bytes) used as the AES-256-GCM key for stored credentials. */
+  CREDENTIAL_ENCRYPTION_KEY: string;
+  /** Optional. Comma-separated days-before-expiry that create reminders, e.g. "30,15,7,3,1,0". */
+  DOMAIN_REMINDER_DAYS?: string;
+  /** Optional. node-cron expression for the daily renewal job. Default: "0 9 * * *". */
+  DOMAIN_CRON_SCHEDULE?: string;
+  /** Optional. IANA timezone for the daily renewal job. Default: "Asia/Dhaka". */
+  DOMAIN_CRON_TIMEZONE?: string;
 }
 
 const loadEnvVariables = (): EnvConfig => {
@@ -53,6 +61,7 @@ const loadEnvVariables = (): EnvConfig => {
     "SMTP_FROM",
     "COMPANY_EMAIL",
     "FRONTEND_URL",
+    "CREDENTIAL_ENCRYPTION_KEY",
   ];
 
   requiredEnvVariables.forEach((key) => {
@@ -60,6 +69,11 @@ const loadEnvVariables = (): EnvConfig => {
       throw new Error(`Missing require environment variable ${key}`);
     }
   });
+
+  // The key must be exactly 32 bytes (64 hex characters) for AES-256.
+  if (!/^[0-9a-fA-F]{64}$/.test(process.env.CREDENTIAL_ENCRYPTION_KEY as string)) {
+    throw new Error("CREDENTIAL_ENCRYPTION_KEY must be 64 hex characters (32 bytes)");
+  }
 
   return {
     PORT: process.env.PORT as string,
@@ -88,6 +102,10 @@ const loadEnvVariables = (): EnvConfig => {
     COMPANY_EMAIL: process.env.COMPANY_EMAIL as string,
     FRONTEND_URL: process.env.FRONTEND_URL as string,
     COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
+    CREDENTIAL_ENCRYPTION_KEY: process.env.CREDENTIAL_ENCRYPTION_KEY as string,
+    DOMAIN_REMINDER_DAYS: process.env.DOMAIN_REMINDER_DAYS || undefined,
+    DOMAIN_CRON_SCHEDULE: process.env.DOMAIN_CRON_SCHEDULE || undefined,
+    DOMAIN_CRON_TIMEZONE: process.env.DOMAIN_CRON_TIMEZONE || undefined,
   };
 };
 

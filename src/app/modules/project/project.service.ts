@@ -1369,6 +1369,26 @@ const getProjectById = async (
     return { data: managerProject };
   }
 
+  // Developers may only open projects they are assigned to
+  if (decodedToken?.role === Role.DEVELOPER) {
+    assertValidObjectId(projectId, "Project ID");
+    assertValidObjectId(decodedToken.userId, "User ID");
+
+    const developerProject = await Project.findOne({
+      _id: projectId,
+      developers: toObjectId(decodedToken.userId),
+      isDeleted: false,
+    })
+      .select(DEVELOPER_HIDDEN_FIELDS)
+      .populate(developerPopulateOptions);
+
+    if (!developerProject) {
+      throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
+    }
+
+    return { data: developerProject };
+  }
+
   const project = await assertProjectExists(projectId);
 
   await project.populate(populateOptions);

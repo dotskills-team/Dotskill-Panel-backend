@@ -56,6 +56,7 @@ if (typeof id !== "string") {
 const getFinancialAccountSummary = catchAsync(async (req, res) => {
   const result = await FinancialAccountService.getFinancialAccountSummary(
     req.user as FinanceActor,
+    req.query.scope,
   );
 
   sendResponse(res, {

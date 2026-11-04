@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import app from "./app";
 import { envVars } from "./app/config/env";
 import { seedAdmin } from "./app/utils/seedAdmin";
+import { startDomainHostingCron } from "./app/modules/domain-hosting/domain-hosting.cron";
 let server: Server;
 
 const startServer = async () => {
@@ -12,6 +13,9 @@ const startServer = async () => {
     console.log("Mongoose is connected!!!");
 
     await seedAdmin();
+
+    // Daily domain & hosting renewal reminders (in-process; see domain-hosting.cron.ts)
+    startDomainHostingCron();
 
     server = app.listen(envVars.PORT, () => {
       console.log(`DotSkills Panel app is running on port ${envVars.PORT}`);

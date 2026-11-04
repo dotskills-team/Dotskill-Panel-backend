@@ -12,6 +12,7 @@ import { FundTransferRoutes } from "../modules/fund-transfer/fund-transfer.route
 import { TransactionRoutes } from "../modules/transaction/transaction.route";
 import { LoanRoutes } from "../modules/loan/loan.route";
 import { DashboardRoutes } from "../modules/dashboard/dashboard.route";
+import { DomainHostingRoutes } from "../modules/domain-hosting/domain-hosting.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -46,6 +47,7 @@ const moduleRoutes = [
    { path: "/transactions", route: TransactionRoutes },
   { path: "/loans", route: LoanRoutes },
 { path: "/dashboard", route: DashboardRoutes },
+  { path: "/domain-hosting", route: DomainHostingRoutes },
 ];
 
 moduleRoutes.forEach((route) => {
