@@ -13,6 +13,8 @@ import { TransactionRoutes } from "../modules/transaction/transaction.route";
 import { LoanRoutes } from "../modules/loan/loan.route";
 import { DashboardRoutes } from "../modules/dashboard/dashboard.route";
 import { DomainHostingRoutes } from "../modules/domain-hosting/domain-hosting.route";
+import { LeaveRoutes } from "../modules/leave/leave.route";
+import { NotificationRoutes } from "../modules/notification/notification.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -48,6 +50,8 @@ const moduleRoutes = [
   { path: "/loans", route: LoanRoutes },
 { path: "/dashboard", route: DashboardRoutes },
   { path: "/domain-hosting", route: DomainHostingRoutes },
+  { path: "/leave", route: LeaveRoutes },
+  { path: "/notifications", route: NotificationRoutes },
 ];
 
 moduleRoutes.forEach((route) => {

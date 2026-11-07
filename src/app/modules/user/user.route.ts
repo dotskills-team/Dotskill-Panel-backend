@@ -5,6 +5,7 @@ import { validateRequest } from "../../middlewares/validateRequest";
 import { checkAuth } from "../../middlewares/checkAuth";
 
 import { Role } from "./user.interface";
+import { imageUpload } from "../../config/multer.config";
 
 import {
   createUserValidationSchema,
@@ -24,6 +25,7 @@ router.get("/me", checkAuth(), UserControllers.getMe);
 router.patch(
   "/me",
   checkAuth(),
+  imageUpload.single("avatar"),
   validateRequest(updateProfileValidationSchema),
   UserControllers.updateProfile,
 );

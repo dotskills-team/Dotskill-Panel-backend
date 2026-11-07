@@ -5,6 +5,7 @@ import app from "./app";
 import { envVars } from "./app/config/env";
 import { seedAdmin } from "./app/utils/seedAdmin";
 import { startDomainHostingCron } from "./app/modules/domain-hosting/domain-hosting.cron";
+import { startLeaveCron } from "./app/modules/leave/leave.cron";
 let server: Server;
 
 const startServer = async () => {
@@ -16,6 +17,9 @@ const startServer = async () => {
 
     // Daily domain & hosting renewal reminders (in-process; see domain-hosting.cron.ts)
     startDomainHostingCron();
+
+    // Leave reminders and yearly balance rollover (in-process; see leave.cron.ts)
+    startLeaveCron();
 
     server = app.listen(envVars.PORT, () => {
       console.log(`DotSkills Panel app is running on port ${envVars.PORT}`);

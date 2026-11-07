@@ -332,8 +332,10 @@ const updateProfile = async (
   const updatedUser = await User.findByIdAndUpdate(
     decodedToken.userId,
     {
-      ...sanitizedPayload,
-      updatedBy: toObjectId(decodedToken.userId),
+      $set: {
+        ...sanitizedPayload,
+        updatedBy: toObjectId(decodedToken.userId),
+      },
     },
     { new: true, runValidators: true },
   );
