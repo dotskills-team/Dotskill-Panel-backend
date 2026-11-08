@@ -193,7 +193,7 @@ const formatDay = (date?: Date | string | null) =>
 const daysUntil = (date: Date) => (date.getTime() - now().getTime()) / DAY_MS;
 
 const formatCount = (amount: number) =>
-  new Intl.NumberFormat("en-BD", { style: "currency", currency: "BDT", maximumFractionDigits: 0 }).format(amount);
+  new Intl.NumberFormat("en-BD", { style: "currency", currency: "BDT", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }).format(amount);
 
 const countBy = (items: string[]) => {
   const map = new Map<string, number>();

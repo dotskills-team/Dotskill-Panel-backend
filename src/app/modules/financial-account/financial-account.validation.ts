@@ -15,7 +15,7 @@ export const createFinancialAccountZodSchema = z.object({
   bankName: z.string().optional(),
   branchName: z.string().optional(),
   openingBalance: z.number().min(0).default(0),
-  currency: z.string().default("BDT"),
+  currency: z.string().default("৳"),
   description: z.string().max(500).optional(),
   status: z.enum(Object.values(ACCOUNT_STATUS) as [string, ...string[]]).optional(),
 });

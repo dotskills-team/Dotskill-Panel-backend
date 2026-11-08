@@ -64,7 +64,7 @@ const financialAccountSchema = new Schema<IFinancialAccount>(
     currency: {
       type: String,
       trim: true,
-      default: "BDT",
+      default: "৳",
     },
 
     description: {
