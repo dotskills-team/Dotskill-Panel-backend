@@ -15,6 +15,7 @@ import { DashboardRoutes } from "../modules/dashboard/dashboard.route";
 import { DomainHostingRoutes } from "../modules/domain-hosting/domain-hosting.route";
 import { LeaveRoutes } from "../modules/leave/leave.route";
 import { NotificationRoutes } from "../modules/notification/notification.route";
+import { AttendanceRoutes } from "../modules/attendance/attendance.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -52,6 +53,7 @@ const moduleRoutes = [
   { path: "/domain-hosting", route: DomainHostingRoutes },
   { path: "/leave", route: LeaveRoutes },
   { path: "/notifications", route: NotificationRoutes },
+  { path: "/attendance", route: AttendanceRoutes },
 ];
 
 moduleRoutes.forEach((route) => {

@@ -49,7 +49,7 @@ export enum TargetType {
   HOSTING = "hosting",
 }
 
-export const DEFAULT_CURRENCY = "BDT";
+export const DEFAULT_CURRENCY = "৳";
 
 /** Items expiring within this many days are marked `expiring_soon`. */
 export const EXPIRING_SOON_DAYS = 30;
