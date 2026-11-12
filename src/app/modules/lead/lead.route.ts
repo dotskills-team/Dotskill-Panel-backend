@@ -20,19 +20,19 @@ const router = Router();
 
 router.post(
   "/create",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   // validateRequest(createLeadValidationSchema),
   LeadControllers.createLead,
 );
 
 router.get(
   "/",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   LeadControllers.getLeads,
 );
 router.get(
   "/calendar",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   LeadControllers.getFollowUpCalendar,
 );
 router.get(
@@ -43,27 +43,27 @@ router.get(
 
 router.get(
   "/:id",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   LeadControllers.getLeadById,
 );
 
 router.patch(
   "/:id",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   // validateRequest(updateLeadValidationSchema),
   LeadControllers.updateLead,
 );
 
 router.patch(
   "/:id/status",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   validateRequest(updateLeadStatusValidationSchema),
   LeadControllers.updateLeadStatus,
 );
 
 router.patch(
   "/:leadId/contact-status",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   validateRequest(updateLeadContactStatusValidationSchema as any),
   LeadControllers.updateLeadContactStatus,
 );
@@ -77,27 +77,27 @@ router.patch(
 
 router.post(
   "/:id/notes",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   validateRequest(addNoteValidationSchema),
   LeadControllers.addNote,
 );
 
 router.patch(
   "/:id/notes/:noteId",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   validateRequest(addNoteValidationSchema),
   LeadControllers.updateNote,
 );
 
 router.delete(
   "/:id/notes/:noteId",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   LeadControllers.deleteNote,
 );
 
 router.post(
   "/:id/attachments",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   validateRequest(addAttachmentValidationSchema),
   LeadControllers.addAttachment,
 );

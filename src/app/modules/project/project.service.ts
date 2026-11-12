@@ -14,6 +14,13 @@ import { QueryBuilder } from "../../utils/QueryBuilder";
 import { projectSearchableFields } from "./project.constants";
 import { Client } from "../clients/client.model";
 import { Role } from "../user/user.interface";
+import {
+  PROJECT_VALUE_FIELDS,
+  PROJECT_VALUE_HIDDEN_SELECT,
+  sanitizeProjectForRole,
+  sanitizeProjectsForRole,
+  stripValueQueryForRole,
+} from "../../utils/projectValue";
 import mongoose, { Types, ClientSession } from "mongoose";
 import { FinancialAccount } from "../financial-account/financial-account.model";
 import { applyAccountChange } from "../transaction/ledger.service";
@@ -234,23 +241,10 @@ const developerPopulateOptions = [
 ];
 
 // Fields a manager must never receive
-const MANAGER_HIDDEN_FIELDS =
-  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -receivedAmount -outstandingAmount -overpaidAmount -hasAdvance";
+const MANAGER_HIDDEN_FIELDS = PROJECT_VALUE_HIDDEN_SELECT;
 
 // Query keys a manager must not use to probe money data
-const MANAGER_BLOCKED_QUERY_KEYS = [
-  "budget",
-  "payments",
-  "paymentSchedule",
-  "paymentStatus",
-  "nextPaymentDate",
-  "balanceReversed",
-  "receivedAmount",
-  "outstandingAmount",
-  "overpaidAmount",
-  "hasAdvance",
-  "fields",
-];
+const MANAGER_BLOCKED_QUERY_KEYS: string[] = [...PROJECT_VALUE_FIELDS, "fields"];
 
 // Payment populate is pointless without payments
 const managerPopulateOptions = populateOptions.filter(
@@ -258,24 +252,12 @@ const managerPopulateOptions = populateOptions.filter(
 );
 
 // Hide money-related fields from developers
-const DEVELOPER_HIDDEN_FIELDS =
-  "-budget -payments -paymentSchedule -paymentStatus -nextPaymentDate -balanceReversed -receivedAmount -outstandingAmount -overpaidAmount -hasAdvance -deletedBy -deletedAt";
+const DEVELOPER_HIDDEN_FIELDS = `${PROJECT_VALUE_HIDDEN_SELECT} -deletedBy -deletedAt`;
 
 
 
 // Money-related keys a manager can never write
-const FINANCIAL_PAYLOAD_KEYS = [
-  "budget",
-  "payments",
-  "paymentSchedule",
-  "paymentStatus",
-  "nextPaymentDate",
-  "balanceReversed",
-  "receivedAmount",
-  "outstandingAmount",
-  "overpaidAmount",
-  "hasAdvance",
-];
+const FINANCIAL_PAYLOAD_KEYS: string[] = [...PROJECT_VALUE_FIELDS];
 
 // Payment filter values sent by the UI that are not stored states
 const PAYMENT_FILTER_OUTSTANDING = "OUTSTANDING";
@@ -707,7 +689,7 @@ const createProject = async (
     );
 
     return {
-      data: populatedProject,
+      data: sanitizeProjectForRole(populatedProject, decodedToken?.role),
     };
   } finally {
     await session.endSession();
@@ -836,7 +818,7 @@ const updateProject = async (
     );
 
     return {
-      data: populatedProject,
+      data: sanitizeProjectForRole(populatedProject, decodedToken?.role),
     };
   } finally {
     await session.endSession();
@@ -925,6 +907,7 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
     total: 0,
     Planning: 0,
     InProgress: 0,
+    QaTesting: 0,
     OnHold: 0,
     Completed: 0,
     DoneDue: 0,
@@ -944,6 +927,10 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
 
         case "IN_PROGRESS":
           result.InProgress = s.count;
+          break;
+
+        case "QA_TESTING":
+          result.QaTesting = s.count;
           break;
 
         case "ON_HOLD":
@@ -1092,6 +1079,8 @@ const getProjects = async (
   if (isManager) {
     MANAGER_BLOCKED_QUERY_KEYS.forEach((key) => delete cleanQuery[key]);
   }
+  // Also blocks sorting and filtering by money for any non-admin role
+  stripValueQueryForRole(cleanQuery, decodedToken?.role);
 
   const dateFilterObj = buildDateFilter(cleanQuery);
 
@@ -1143,7 +1132,7 @@ const getProjects = async (
   ]);
 
   return {
-    data,
+    data: sanitizeProjectsForRole(data, decodedToken?.role),
     meta,
     stats,
   };
@@ -1154,14 +1143,21 @@ const getProjects = async (
  */
 const getDeletedProjects = async (
   query: Record<string, string>,
+  decodedToken?: JwtPayload,
 ) => {
+  const role = decodedToken?.role;
+  const isAdminLevel = role === Role.SUPER_ADMIN || role === Role.ADMIN;
+
   const baseFilter: Record<string, any> = {
     isDeleted: true,
   };
 
+  // Non-admin roles (managers) must not see project money in the trash either
+  const cleanQuery = stripValueQueryForRole(sanitizeQuery(query), role);
+
   const queryBuilder = new QueryBuilder(
     Project.find(baseFilter),
-    sanitizeQuery(query),
+    cleanQuery,
   );
 
   const projectsQuery = queryBuilder
@@ -1172,15 +1168,14 @@ const getDeletedProjects = async (
     .paginate();
 
   const [data, meta] = await Promise.all([
-    projectsQuery
-      .build()
-      .populate(populateOptions),
+    (isAdminLevel ? projectsQuery.build() : projectsQuery.build().select(MANAGER_HIDDEN_FIELDS))
+      .populate(isAdminLevel ? populateOptions : managerPopulateOptions),
 
     queryBuilder.getMeta(),
   ]);
 
   return {
-    data,
+    data: sanitizeProjectsForRole(data, role),
     meta,
   };
 };
@@ -1219,6 +1214,7 @@ const getDeveloperStatusStats = async (
     total: 0,
     Planning: 0,
     InProgress: 0,
+    QaTesting: 0,
     OnHold: 0,
     Completed: 0,
     DoneDue: 0,
@@ -1232,6 +1228,9 @@ const getDeveloperStatusStats = async (
         break;
       case "IN_PROGRESS":
         result.InProgress = s.count;
+        break;
+      case "QA_TESTING":
+        result.QaTesting = s.count;
         break;
       case "ON_HOLD":
         result.OnHold = s.count;
@@ -1267,6 +1266,7 @@ const getMyAssignedProjects = async (
 
   const cleanQuery = sanitizeQuery(query);
   DEVELOPER_BLOCKED_QUERY_KEYS.forEach((key) => delete cleanQuery[key]);
+  stripValueQueryForRole(cleanQuery, decodedToken.role);
 
   const dateFilterObj = buildDateFilter(cleanQuery);
 
@@ -1325,7 +1325,7 @@ const getMyAssignedProjects = async (
   ]);
 
   return {
-    data,
+    data: sanitizeProjectsForRole(data, decodedToken.role),
     meta,
     stats: { ...stats, clients },
   };
@@ -1366,7 +1366,7 @@ const getProjectById = async (
       throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
     }
 
-    return { data: managerProject };
+    return { data: sanitizeProjectForRole(managerProject, decodedToken.role) };
   }
 
   // Developers may only open projects they are assigned to
@@ -1386,7 +1386,7 @@ const getProjectById = async (
       throw new AppError(httpStatus.NOT_FOUND, "Project not found.");
     }
 
-    return { data: developerProject };
+    return { data: sanitizeProjectForRole(developerProject, decodedToken.role) };
   }
 
   const project = await assertProjectExists(projectId);
@@ -1394,10 +1394,9 @@ const getProjectById = async (
   await project.populate(populateOptions);
 
   return {
-    data: project,
+    data: sanitizeProjectForRole(project, decodedToken?.role),
   };
 };
-
 // const updateProject = async (
 //   projectId: string,
 //   payload: Partial<IProject>,

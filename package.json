@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only ./src/server.ts",
     "migrate:deliveredAt": "ts-node-dev --transpile-only src/scripts/migrateDeliveredAt.ts",
+    "test:kpi": "node --require ts-node/register/transpile-only --test src/app/modules/kpi/kpi.achievement.test.ts src/app/modules/kpi-report/kpi-report.utils.test.ts src/app/utils/projectValue.test.ts",
+    "migrate:clientCreditedTo": "ts-node-dev --transpile-only src/scripts/migrateClientCreditedTo.ts",
     "lint": "npx eslint ./src",
     "clear:db": "ts-node-dev src/scripts/clearDB.ts",
     "generate:secret": "ts-node-dev src/scripts/generateSecret.ts",

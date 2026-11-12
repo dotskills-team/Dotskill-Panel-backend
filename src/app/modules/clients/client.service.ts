@@ -10,7 +10,16 @@ import { ClientStatus, IClient } from "./client.interface";
 import { clientSearchableFields } from "./client.constant";
 
 import { User } from "../user/user.model";
-import { Role } from "../user/user.interface";
+import { Role, UserStatus } from "../user/user.interface";
+import { isMarketingSalesTeam } from "../../utils/roleHelpers";
+import {
+  CLIENT_VALUE_FIELDS,
+  projectValueSelectFor,
+  sanitizeClientForRole,
+  sanitizeClientsForRole,
+  sanitizeClientStatsForRole,
+  stripValueQueryForRole,
+} from "../../utils/projectValue";
 import { ClientNote } from "./clientNote/clientNote.model";
 import { ClientDocument } from "./clientDocument/clientDocument.model";
 import { ClientDocumentType } from "./clientDocument/clientDocument.interface";
@@ -24,6 +33,9 @@ const PROTECTED_FIELDS: (keyof IClient | string)[] = [
 
   "createdBy",
   "updatedBy",
+
+  // Changed only through the dedicated credited-to rules below
+  "creditedTo",
 
   "deletedBy",
   "deletedAt",
@@ -99,18 +111,53 @@ const assertManagerExists = async (userId: string) => {
   return user;
 };
 
+// Roles that may set or change "credited to" on a client
+const CREDIT_EDIT_ROLES: string[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.MARKETING_SALES_LEAD];
+
+const canEditCreditedTo = (role?: string | null): boolean =>
+  !!role && CREDIT_EDIT_ROLES.includes(role);
+
+// The credited user must be an active marketing/sales team member
+const assertCreditedUserValid = async (userId: string) => {
+  assertValidObjectId(userId, "creditedTo id");
+
+  const user = await User.findOne({
+    _id: userId,
+    isDeleted: false,
+    status: UserStatus.ACTIVE,
+  })
+    .select("role")
+    .lean();
+
+  if (!user || !isMarketingSalesTeam(user.role)) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Credited user must be an active marketing/sales team member.",
+    );
+  }
+
+  return user;
+};
+
 // clientId (string) -> projects[] (single query for all given clients)
 const getProjectsByClient = async (
   clientIds: (Types.ObjectId | string)[],
+  role?: string | null,
 ): Promise<Map<string, any[]>> => {
   const map = new Map<string, any[]>();
 
   if (!clientIds.length) return map;
 
-  const projects = await Project.find({
+  // Non-admin roles never receive project money (budget, payments, dues)
+  const valueSelect = projectValueSelectFor(role);
+
+  let projectQuery = Project.find({
     client: { $in: clientIds.map((id) => new Types.ObjectId(String(id))) },
     isDeleted: { $ne: true },
-  })
+  });
+  if (valueSelect) projectQuery = projectQuery.select(valueSelect);
+
+  const projects = await projectQuery
     .sort({ createdAt: -1 })
     .populate([
       {
@@ -223,6 +270,10 @@ const populateOptions = [
     select: "firstName lastName email designation",
   },
   {
+    path: "creditedTo",
+    select: "firstName lastName email role",
+  },
+  {
     path: "createdBy",
     select: "firstName lastName email",
   },
@@ -333,8 +384,17 @@ const getStatusStats = async (filter: Record<string, unknown> = {}) => {
   return result;
 };
 
-const getClients = async (query: Record<string, string>) => {
-  const cleanQuery = sanitizeQuery(query);
+const getClients = async (
+  query: Record<string, string>,
+  decodedToken?: JwtPayload,
+) => {
+  const role = decodedToken?.role;
+  // Non-admin roles cannot filter, sort or project by money rollups
+  const cleanQuery = stripValueQueryForRole(
+    sanitizeQuery(query),
+    role,
+    CLIENT_VALUE_FIELDS,
+  );
   const dateFilterObj = buildDateFilter(cleanQuery);
 
   // Default sort: newest first
@@ -364,6 +424,7 @@ const getClients = async (query: Record<string, string>) => {
 
   const projectsByClient = await getProjectsByClient(
     clients.map((c) => c._id as Types.ObjectId),
+    role,
   );
 
   const data = clients.map((client) => ({
@@ -372,14 +433,22 @@ const getClients = async (query: Record<string, string>) => {
   }));
 
   return {
-    data,
+    data: sanitizeClientsForRole(data, role),
     meta,
-    stats,
+    stats: sanitizeClientStatsForRole(stats, role),
   };
 };
 
-const getDeletedClients = async (query: Record<string, string>) => {
-  const cleanQuery = sanitizeQuery(query);
+const getDeletedClients = async (
+  query: Record<string, string>,
+  decodedToken?: JwtPayload,
+) => {
+  const role = decodedToken?.role;
+  const cleanQuery = stripValueQueryForRole(
+    sanitizeQuery(query),
+    role,
+    CLIENT_VALUE_FIELDS,
+  );
   const dateFilterObj = buildDateFilter(cleanQuery);
 
   const baseFilter: Record<string, any> = {
@@ -402,12 +471,12 @@ const getDeletedClients = async (query: Record<string, string>) => {
   ]);
 
   return {
-    data,
+    data: sanitizeClientsForRole(data, role),
     meta,
   };
 };
 
-const getClientById = async (clientId: string) => {
+const getClientById = async (clientId: string, decodedToken?: JwtPayload) => {
   assertValidObjectId(clientId);
 
   const client = await Client.findOne({
@@ -420,7 +489,7 @@ const getClientById = async (clientId: string) => {
   }
 
   return {
-    data: client,
+    data: sanitizeClientForRole(client, decodedToken?.role),
   };
 };
 
@@ -436,6 +505,8 @@ const createClient = async (
     ...payload,
     createdBy: toObjectId(decodedToken.userId),
     updatedBy: toObjectId(decodedToken.userId),
+    // A new client is credited to whoever creates it
+    creditedTo: toObjectId(decodedToken.userId),
   });
 
   const populatedClient = await Client.findById(client._id).populate(
@@ -460,10 +531,24 @@ const updateClient = async (
 
   const sanitizedPayload = stripProtectedFields(payload);
 
+  // creditedTo is stripped above; apply it only for allowed roles
+  const creditUpdate: { creditedTo?: Types.ObjectId } = {};
+  if (payload.creditedTo !== undefined) {
+    if (!canEditCreditedTo(decodedToken.role)) {
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        "You are not allowed to change who a client is credited to.",
+      );
+    }
+    await assertCreditedUserValid(String(payload.creditedTo));
+    creditUpdate.creditedTo = toObjectId(String(payload.creditedTo));
+  }
+
   const updatedClient = await Client.findByIdAndUpdate(
     clientId,
     {
       ...sanitizedPayload,
+      ...creditUpdate,
       updatedBy: toObjectId(decodedToken.userId),
     },
     {
@@ -475,6 +560,59 @@ const updateClient = async (
   return {
     data: updatedClient,
   };
+};
+
+/**
+ * Changes only the "credited to" user. Allowed for admins and the
+ * marketing & sales lead, who cannot otherwise edit clients.
+ */
+const updateCreditedTo = async (
+  clientId: string,
+  creditedTo: string,
+  decodedToken: JwtPayload,
+) => {
+  if (!canEditCreditedTo(decodedToken.role)) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "You are not allowed to change who a client is credited to.",
+    );
+  }
+
+  await assertClientExists(clientId);
+  await assertCreditedUserValid(creditedTo);
+
+  const updatedClient = await Client.findByIdAndUpdate(
+    clientId,
+    {
+      creditedTo: toObjectId(creditedTo),
+      updatedBy: toObjectId(decodedToken.userId),
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  ).populate(populateOptions);
+
+  return {
+    data: sanitizeClientForRole(updatedClient, decodedToken.role),
+  };
+};
+
+/**
+ * Users that can be picked in "credited to": active marketing/sales team members.
+ * Needed because the lead cannot call the general users list.
+ */
+const getCreditCandidates = async () => {
+  const users = await User.find({
+    isDeleted: false,
+    status: UserStatus.ACTIVE,
+    role: { $in: [Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD] },
+  })
+    .select("firstName lastName email role")
+    .sort({ firstName: 1, lastName: 1 })
+    .lean();
+
+  return { data: users };
 };
 
 const updateClientStatus = async (
@@ -682,6 +820,8 @@ export const ClientServices = {
   getClientById,
 
   updateClient,
+  updateCreditedTo,
+  getCreditCandidates,
   updateClientStatus,
   assignClientManager,
 

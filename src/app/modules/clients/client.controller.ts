@@ -7,6 +7,7 @@ import { sendResponse } from "../../utils/sendResponse";
 
 import { ClientServices } from "./client.service";
 import { ClientStatus, IClient } from "./client.interface";
+import { sanitizeClientForRole } from "../../utils/projectValue";
 
 const createClient = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
@@ -21,7 +22,7 @@ const createClient = catchAsync(
       statusCode: httpStatus.CREATED,
       success: true,
       message: "Client created successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -30,6 +31,7 @@ const getDeletedClients = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const result = await ClientServices.getDeletedClients(
       req.query as Record<string, string>,
+      req.user as JwtPayload,
     );
 
     sendResponse(res, {
@@ -46,6 +48,7 @@ const getClients = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
     const result = await ClientServices.getClients(
       req.query as Record<string, string>,
+      req.user as JwtPayload,
     );
 
     sendResponse(res, {
@@ -61,7 +64,10 @@ const getClients = catchAsync(
 
 const getClientById = catchAsync(
   async (req: Request, res: Response, _next: NextFunction) => {
-    const result = await ClientServices.getClientById(req.params.id as string);
+    const result = await ClientServices.getClientById(
+      req.params.id as string,
+      req.user as JwtPayload,
+    );
 
     sendResponse(res, {
       statusCode: httpStatus.OK,
@@ -86,6 +92,38 @@ const updateClient = catchAsync(
       statusCode: httpStatus.OK,
       success: true,
       message: "Client updated successfully.",
+      data: sanitizeClientForRole(result.data, decodedToken.role),
+    });
+  },
+);
+
+const getCreditCandidates = catchAsync(
+  async (_req: Request, res: Response, _next: NextFunction) => {
+    const result = await ClientServices.getCreditCandidates();
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Credit candidates retrieved successfully.",
+      data: result.data,
+    });
+  },
+);
+
+const updateCreditedTo = catchAsync(
+  async (req: Request, res: Response, _next: NextFunction) => {
+    const decodedToken = req.user as JwtPayload;
+
+    const result = await ClientServices.updateCreditedTo(
+      req.params.id as string,
+      req.body.creditedTo as string,
+      decodedToken,
+    );
+
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Client credit updated successfully.",
       data: result.data,
     });
   },
@@ -105,7 +143,7 @@ const updateClientStatus = catchAsync(
       statusCode: httpStatus.OK,
       success: true,
       message: "Client status updated successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -124,7 +162,7 @@ const assignClientManager = catchAsync(
       statusCode: httpStatus.OK,
       success: true,
       message: "Client assigned successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -143,7 +181,7 @@ const addNote = catchAsync(
       statusCode: httpStatus.CREATED,
       success: true,
       message: "Note added successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -162,7 +200,7 @@ const addDocument = catchAsync(
       statusCode: httpStatus.CREATED,
       success: true,
       message: "Document added successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -198,7 +236,7 @@ const restoreClient = catchAsync(
       statusCode: httpStatus.OK,
       success: true,
       message: "Client restored successfully.",
-      data: result.data,
+      data: sanitizeClientForRole(result.data, decodedToken.role),
     });
   },
 );
@@ -229,6 +267,8 @@ export const ClientControllers = {
   getClientById,
 
   updateClient,
+  updateCreditedTo,
+  getCreditCandidates,
   updateClientStatus,
   assignClientManager,
 

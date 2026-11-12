@@ -16,6 +16,8 @@ import { DomainHostingRoutes } from "../modules/domain-hosting/domain-hosting.ro
 import { LeaveRoutes } from "../modules/leave/leave.route";
 import { NotificationRoutes } from "../modules/notification/notification.route";
 import { AttendanceRoutes } from "../modules/attendance/attendance.route";
+import { KpiRoutes } from "../modules/kpi/kpi.route";
+import { KpiReportRoutes } from "../modules/kpi-report/kpi-report.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -54,6 +56,8 @@ const moduleRoutes = [
   { path: "/leave", route: LeaveRoutes },
   { path: "/notifications", route: NotificationRoutes },
   { path: "/attendance", route: AttendanceRoutes },
+  { path: "/kpis", route: KpiRoutes },
+  { path: "/kpi-reports", route: KpiReportRoutes },
 ];
 
 moduleRoutes.forEach((route) => {

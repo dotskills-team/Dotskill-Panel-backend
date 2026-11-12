@@ -12,7 +12,6 @@ const objectId = z
 const phoneSchema = z
   .string()
   .trim()
-  .regex(/^(?:\+880|880|0)?1[3-9]\d{8}$/, "Invalid phone number.")
   .optional()
   .or(z.literal(""));
 
@@ -102,7 +101,15 @@ const clientBaseSchema = {
 
 export const createClientValidationSchema = z.object(clientBaseSchema);
 
-export const updateClientValidationSchema = z.object(clientBaseSchema);
+// creditedTo is only accepted on update; the service enforces who may change it
+export const updateClientValidationSchema = z.object({
+  ...clientBaseSchema,
+  creditedTo: objectId.optional(),
+});
+
+export const updateCreditedToValidationSchema = z.object({
+  creditedTo: objectId,
+});
 
 export const addClientNoteValidationSchema = z.object({
   message: z

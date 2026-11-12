@@ -88,6 +88,10 @@ export interface IClient {
   deletedAt?: Date;
 
   accountManager?: Types.ObjectId;
+
+  // Marketing/sales team member who gets the credit for this client
+  creditedTo?: Types.ObjectId;
+
   deletedBy?: Types.ObjectId;
 
   createdBy?: Types.ObjectId;

@@ -151,18 +151,22 @@ const resetPassword = async (token: string, newPassword: string) => {
 };
 
 const adminChangePassword = async (userId: string, newPassword: string) => {
-  const user = await User.findById(userId);
-
-  if (!user) {
-    throw new AppError(404, "User not found");
-  }
-
-  user.password = await bcryptjs.hash(
+  const hashedPassword = await bcryptjs.hash(
     newPassword,
     Number(envVars.BCRYPT_SALT_ROUND),
   );
 
-  await user.save();
+  // Targeted update (no full-document validation) so users with a legacy
+  // role value (e.g. "MARKETER") can still have their password reset.
+  const result = await User.updateOne(
+    { _id: userId },
+    { $set: { password: hashedPassword, passwordChangedAt: new Date() } },
+    { runValidators: false },
+  );
+
+  if (result.matchedCount === 0) {
+    throw new AppError(404, "User not found");
+  }
 
   return null;
 };

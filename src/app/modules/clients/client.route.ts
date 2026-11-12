@@ -15,6 +15,7 @@ import {
   createClientValidationSchema,
   updateClientStatusValidationSchema,
   updateClientValidationSchema,
+  updateCreditedToValidationSchema,
 } from "./client.validation";
 
 const router = Router();
@@ -28,8 +29,15 @@ router.post(
 
 router.get(
   "/",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   ClientControllers.getClients,
+);
+
+// Must be declared BEFORE "/:id"
+router.get(
+  "/credit-candidates",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MARKETING_SALES_LEAD),
+  ClientControllers.getCreditCandidates,
 );
 
 router.get(
@@ -40,7 +48,7 @@ router.get(
 
 router.get(
   "/:id",
-  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.MARKETER),
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.SALES_MARKETING, Role.MARKETING_SALES_LEAD),
   ClientControllers.getClientById,
 );
 
@@ -49,6 +57,16 @@ router.patch(
   checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER),
   validateRequest(updateClientValidationSchema as unknown as AnyZodObject),
   ClientControllers.updateClient,
+);
+
+// Admins and the marketing & sales lead may change who a client is credited to
+router.patch(
+  "/:id/credited-to",
+  checkAuth(Role.SUPER_ADMIN, Role.ADMIN, Role.MARKETING_SALES_LEAD),
+  validateRequest(
+    updateCreditedToValidationSchema as unknown as AnyZodObject,
+  ),
+  ClientControllers.updateCreditedTo,
 );
 
 router.patch(

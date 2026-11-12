@@ -86,7 +86,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Projects still in progress (money may still be owed). */
-const ACTIVE_PROJECT_STATUSES = ["PLANNING", "IN_PROGRESS", "PENDING", "ON_HOLD", "DONE_DUE"];
+const ACTIVE_PROJECT_STATUSES = ["PLANNING", "IN_PROGRESS", "QA_TESTING", "PENDING", "ON_HOLD", "DONE_DUE"];
 const FINISHED_PROJECT_STATUSES = ["COMPLETED", "DELIVERED"];
 
 const oid = (id: string) => new Types.ObjectId(id);
@@ -337,6 +337,17 @@ const expensesSince = async (from: Date, createdBy?: Types.ObjectId, to: Date = 
   return { total: row?.total ?? 0, count: row?.count ?? 0 };
 };
 
+/** Team salary actually paid (payments dated inside the range). Salaries are not stored as Expense records. */
+const salaryPaidBetween = async (from: Date, to: Date) => {
+  const [row] = (await TeamSalary.aggregate([
+    { $match: { cancelledAt: null } },
+    { $unwind: "$payments" },
+    { $match: { "payments.paymentDate": { $gte: from, $lte: to } } },
+    { $group: { _id: null, total: { $sum: "$payments.amount" } } },
+  ])) as Array<{ total: number }>;
+  return row?.total ?? 0;
+};
+
 const expensesByCategory = async (from: Date, to: Date) =>
   (await Expense.aggregate([
     { $match: { ...expenseMatch(), expenseDate: { $gte: from, $lte: to } } },
@@ -406,7 +417,7 @@ const buildAdmin = async (actor: FinanceActor, range: DashboardRange): Promise<B
   const allCollected = projects.reduce((s, p) => s + paidOf(p), 0);
   const periodCollected = collectedBetween(projects, range);
 
-  const [expPeriod, myBalance, leadRows, openLeads, salaryRows, userRows, expenseMap, collectedMap, categories, recentExpenses] =
+  const [expPeriod, myBalance, leadRows, openLeads, salaryRows, expenseMap, collectedMap, categories, recentExpenses, salaryPaid] =
     await Promise.all([
       expensesSince(range.from, undefined, range.to),
       myAccountsBalance(uid),
@@ -422,32 +433,28 @@ const buildAdmin = async (actor: FinanceActor, range: DashboardRange): Promise<B
         { $match: { status: { $in: [SalaryPaymentStatus.PENDING, SalaryPaymentStatus.PARTIAL, SalaryPaymentStatus.OVERDUE] }, cancelledAt: null } },
         { $group: { _id: null, due: { $sum: "$dueAmount" } } },
       ]) as Promise<Array<{ due: number }>>,
-      User.aggregate([
-        { $match: { isDeleted: { $ne: true } } },
-        { $group: { _id: "$role", count: { $sum: 1 } } },
-      ]) as Promise<Array<{ _id: string; count: number }>>,
       expensesByMonth(undefined, range.from, range.to),
       Promise.resolve(collectedByMonth(projects, range)),
       expensesByCategory(range.from, range.to),
       recentExpensesIn(range, 6),
+      salaryPaidBetween(range.from, range.to),
     ]);
 
   const salaryDue = salaryRows[0]?.due ?? 0;
-  const teamTotal = userRows.reduce((s, r) => s + r.count, 0);
   const totalLeads = leadRows.reduce((s, r) => s + r.count, 0);
   const leadCountOf = (status: string) => leadRows.find((r) => r._id === status)?.count ?? 0;
-  const net = periodCollected - expPeriod.total;
+  const net = periodCollected - (salaryPaid + expPeriod.total);
 
   return {
     kpis: [
-      { key: "collected", label: "Collected", value: periodCollected, format: "currency", hint: `In the selected period · ${formatCount(allCollected)} in total`, tone: "emerald" },
+      { key: "collected", label: "Revenue", value: periodCollected, format: "currency", hint: `In the selected period · ${formatCount(allCollected)} in total`, tone: "emerald" },
       { key: "expenses", label: "Expenses", value: expPeriod.total, format: "currency", hint: `${expPeriod.count} recorded in the period`, tone: "rose" },
-      { key: "net", label: "Net", value: net, format: "currency", hint: "Collected minus expenses in the period", tone: net >= 0 ? "teal" : "amber" },
+      { key: "totalSalary", label: "Total salary", value: salaryPaid, format: "currency", hint: "Team salary paid in the period", tone: "violet" },
+      { key: "net", label: "Net profit", value: net, format: "currency", hint: "Collected minus (salary + expenses) in the period", tone: net >= 0 ? "teal" : "amber" },
       { key: "outstanding", label: "Outstanding dues", value: outstanding, format: "currency", hint: `${active.length} active project${active.length === 1 ? "" : "s"} · as of today`, tone: "amber" },
       { key: "salaryDue", label: "Salary due", value: salaryDue, format: "currency", hint: "Pending team salaries · as of today", tone: "violet" },
       { key: "openLeads", label: "Open leads", value: openLeads, format: "number", hint: `${totalLeads} leads in total`, tone: "sky" },
       { key: "myBalance", label: "My accounts", value: myBalance, format: "currency", hint: "Balance on accounts you own", tone: "indigo" },
-      { key: "team", label: "Team members", value: teamTotal, format: "number", hint: "Active and inactive users", tone: "blue" },
     ],
     trend: {
       title: "Money in vs money out",
@@ -470,7 +477,6 @@ const buildAdmin = async (actor: FinanceActor, range: DashboardRange): Promise<B
         items: LEAD_PIPELINE.map((s) => ({ label: pretty(s), value: leadCountOf(s) })),
       },
       { key: "expenseCategories", title: "Expenses by category (period)", type: "donut", items: categories },
-      // { key: "teamRoles", title: "Team by role", type: "bar", items: userRows.map((r) => ({ label: pretty(r._id), value: r.count })) },
     ],
     lists: [
       {
@@ -676,8 +682,8 @@ const buildLeadFocused = async (actor: FinanceActor): Promise<Body> => {
  * The dashboard shows different data per role:
  * - SUPER_ADMIN / ADMIN: company-wide money, projects, leads and team. Date filter applies.
  * - MANAGER: all projects, deadlines and their own expenses (no payment data). Date filter applies to expenses.
- * - DEVELOPER / DESIGNER: the projects they are assigned to, their salary and deadlines.
- * - MARKETER / STAFF: leads and clients, plus their own expenses.
+ * - DEVELOPER / DESIGNER / VIDEO_EDITOR: the projects they are assigned to, their salary and deadlines.
+ * - SALES_MARKETING / MARKETING_SALES_LEAD / STAFF: leads and clients, plus their own expenses.
  * Balances are always limited to accounts the user owns.
  */
 const getOverview = async (actor: FinanceActor, query: Record<string, unknown> = {}): Promise<DashboardOverview> => {
@@ -690,7 +696,7 @@ const getOverview = async (actor: FinanceActor, query: Record<string, unknown> =
     body = await buildAdmin(actor, range);
   } else if (actor.role === Role.MANAGER) {
     body = await buildManager(actor, range);
-  } else if (actor.role === Role.DEVELOPER || actor.role === Role.DESIGNER) {
+  } else if (actor.role === Role.DEVELOPER || actor.role === Role.DESIGNER || actor.role === Role.VIDEO_EDITOR) {
     body = await buildDeveloper(actor);
   } else {
     body = await buildLeadFocused(actor);

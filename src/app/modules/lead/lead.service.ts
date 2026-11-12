@@ -864,6 +864,8 @@ const convertLead = async (
   clientCode: `CLI-${Date.now()}`,
 
   createdBy: toObjectId(decodedToken.userId),
+  // The user who converts the lead gets the credit for the new client
+  creditedTo: toObjectId(decodedToken.userId),
   updatedBy: toObjectId(decodedToken.userId),
 });
 

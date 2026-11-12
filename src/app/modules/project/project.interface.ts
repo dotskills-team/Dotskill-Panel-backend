@@ -5,6 +5,7 @@ import { Types } from "mongoose";
 export enum ProjectStatus {
     PLANNING = "PLANNING",
     IN_PROGRESS = "IN_PROGRESS",
+    QA_TESTING = "QA_TESTING",
     ON_HOLD = "ON_HOLD",
     COMPLETED = "COMPLETED",
     CANCELLED = "CANCELLED",

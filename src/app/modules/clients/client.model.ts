@@ -15,6 +15,13 @@ const clientSchema = new Schema<IClient>(
       ref: "User",
     },
 
+    // Marketing/sales team member who gets the credit for this client
+    creditedTo: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+
     clientType: {
       type: String,
       enum: Object.values(ClientType),

@@ -85,6 +85,7 @@ const getDeletedProjects = catchAsync(
         const result =
             await ProjectServices.getDeletedProjects(
                 req.query as Record<string, string>,
+                req.user as JwtPayload,
             );
 
         sendResponse(res, {
