@@ -37,6 +37,10 @@ interface EnvConfig {
   DOMAIN_CRON_SCHEDULE?: string;
   /** Optional. IANA timezone for the daily renewal job. Default: "Asia/Dhaka". */
   DOMAIN_CRON_TIMEZONE?: string;
+  /** Google Gemini API key for the AI assistant (https://aistudio.google.com/apikey). */
+  GEMINI_API_KEY: string;
+  /** Optional. Gemini model tried first; built-in fallbacks follow (see DEFAULT_AI_MODELS). */
+  GEMINI_MODEL?: string;
 }
 
 const loadEnvVariables = (): EnvConfig => {
@@ -62,6 +66,7 @@ const loadEnvVariables = (): EnvConfig => {
     "COMPANY_EMAIL",
     "FRONTEND_URL",
     "CREDENTIAL_ENCRYPTION_KEY",
+    "GEMINI_API_KEY",
   ];
 
   requiredEnvVariables.forEach((key) => {
@@ -106,6 +111,8 @@ const loadEnvVariables = (): EnvConfig => {
     DOMAIN_REMINDER_DAYS: process.env.DOMAIN_REMINDER_DAYS || undefined,
     DOMAIN_CRON_SCHEDULE: process.env.DOMAIN_CRON_SCHEDULE || undefined,
     DOMAIN_CRON_TIMEZONE: process.env.DOMAIN_CRON_TIMEZONE || undefined,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY as string,
+    GEMINI_MODEL: process.env.GEMINI_MODEL || undefined,
   };
 };
 

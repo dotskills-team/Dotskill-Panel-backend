@@ -18,6 +18,7 @@ import { NotificationRoutes } from "../modules/notification/notification.route";
 import { AttendanceRoutes } from "../modules/attendance/attendance.route";
 import { KpiRoutes } from "../modules/kpi/kpi.route";
 import { KpiReportRoutes } from "../modules/kpi-report/kpi-report.route";
+import { AiRoutes } from "../modules/ai/ai.route";
 export const router = Router();
 
 const moduleRoutes = [
@@ -58,6 +59,7 @@ const moduleRoutes = [
   { path: "/attendance", route: AttendanceRoutes },
   { path: "/kpis", route: KpiRoutes },
   { path: "/kpi-reports", route: KpiReportRoutes },
+  { path: "/ai", route: AiRoutes },
 ];
 
 moduleRoutes.forEach((route) => {
