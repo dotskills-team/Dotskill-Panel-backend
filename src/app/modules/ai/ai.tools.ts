@@ -24,12 +24,26 @@ import { TransactionService } from "../transaction/transaction.service";
 import { FundTransferService } from "../fund-transfer/fund-transfer.service";
 import { UserServices } from "../user/user.service";
 import { AiToolDeclaration, AiToolSchema } from "./providers/ai-provider.interface";
+import { createLeadValidationSchema } from "../lead/lead.validation";
+import { ExtraLeaveType, HalfDaySession, LeaveStatus, LeaveType } from "../leave/leave.constant";
+import { createClientValidationSchema } from "../clients/client.validation";
+import { ClientStatus, ClientType } from "../clients/client.interface";
+import { createProjectValidationSchema } from "../project/project.validation";
+import { ProjectStatus, ProjectType } from "../project/project.interface";
+import { ExpenseCategoryService } from "../expense-category/expense-category.service";
+import {
+  LeadPriority,
+  LeadSource,
+  LeadStatus,
+  LeadType,
+  PreferredContactMethod,
+} from "../lead/lead.interface";
 
 /**
- * Read-only tools for the AI assistant.
+ * Tools for the AI assistant: mostly read-only, plus the write tools in AI_WRITE_TOOLS.
  *
  * Rules every tool follows:
- *  - It only calls an existing service-layer function (never a model directly, never a write).
+ *  - It only calls an existing service-layer function (never a model directly).
  *  - `allowedRoles` mirrors the role list of the matching REST route, because several services
  *    do not check the role themselves.
  *  - Money fields are stripped for roles that may not see project value (see utils/projectValue).
@@ -90,10 +104,14 @@ const personName = (value: unknown): string | undefined => {
   return undefined;
 };
 
+// Bangladesh is a fixed UTC+6 (no DST). Dates must be shown in BD time, otherwise anything
+// between 00:00 and 06:00 BD time is reported as the previous day.
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+
 const day = (value: unknown): string | undefined => {
   if (!value) return undefined;
   const d = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString().slice(0, 10);
+  return Number.isNaN(d.getTime()) ? undefined : new Date(d.getTime() + BD_OFFSET_MS).toISOString().slice(0, 10);
 };
 
 const clampLimit = (limit: number | undefined, fallback = 10) =>
@@ -168,6 +186,37 @@ const compactLead = (lead: unknown): Json => {
     requirementTitle: l.requirementTitle,
   };
 };
+
+// The shared QueryBuilder matches the WHOLE search text against one field at a time, so "Demo Lead"
+// (firstName Demo + lastName Lead) finds nothing. For multi-word searches we search each word, merge the
+// results and keep only records that contain every word.
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const searchWords = (search?: string) => (search ?? "").split(/\s+/).filter(Boolean).slice(0, 4);
+
+const searchAllWords = async (
+  words: string[],
+  fetchBy: (term: string) => Promise<unknown[]>,
+  compact: (item: unknown) => Json,
+): Promise<Json[]> => {
+  const lists = await Promise.all(words.map((w) => fetchBy(escapeRegex(w))));
+  const merged = new Map<string, Json>();
+  for (const list of lists) {
+    for (const item of list) {
+      const c = compact(item);
+      if (!merged.has(String(c.id))) merged.set(String(c.id), c);
+    }
+  }
+  const lower = words.map((w) => w.toLowerCase());
+  return [...merged.values()].filter((c) => {
+    const haystack = Object.values(c)
+      .filter((v) => typeof v === "string" || typeof v === "number")
+      .join(" ")
+      .toLowerCase();
+    return lower.every((w) => haystack.includes(w));
+  });
+};
+
+const MULTI_WORD_FETCH_LIMIT = "50";
 
 const startOfToday = () => {
   const d = new Date();
@@ -256,6 +305,7 @@ const compactAttendanceDay = (record: unknown): Json => {
   const a = toPlain(record);
   const time = (v: unknown) => (v ? new Date(String(v)).toISOString() : null);
   return {
+    id: String(a._id ?? ""),
     employee: personName(a.user),
     date: a.date,
     state: a.state,
@@ -275,6 +325,7 @@ const compactLeave = (request: unknown): Json => {
     employee: personName(l.staff),
     leaveType: l.leaveType,
     status: l.status,
+    submittedAt: day(l.createdAt),
     startDate: day(l.startDate),
     endDate: day(l.endDate),
     totalDays: l.totalDays,
@@ -398,7 +449,11 @@ const attendanceListArgs = z.object({
   limit: limitArg,
 });
 const leaveListArgs = z.object({
-  status: z.string().trim().max(30).optional(),
+  // Leave statuses are stored in lowercase; accept any case from the model.
+  status: z.preprocess(
+    (v) => (typeof v === "string" ? v.trim().toLowerCase() : v),
+    z.nativeEnum(LeaveStatus).optional(),
+  ),
   from: dateStr.optional(),
   to: dateStr.optional(),
   staffId: objectId.optional(),
@@ -410,11 +465,32 @@ const leaveBalanceArgs = z.object({
 });
 const expenseArgs = z.object({
   search: z.string().trim().max(100).optional(),
+  month: monthStr.optional(),
   startDate: dateStr.optional(),
   endDate: dateStr.optional(),
   mine: z.boolean().optional(),
   limit: limitArg,
 });
+
+/**
+ * Turns month / startDate / endDate into a complete [from, to] range. The expense service treats a
+ * lone startDate or endDate as ONE single day, which silently gives a wrong total for "this month"
+ * or "since X" questions, so we always send both ends.
+ */
+const expensePeriod = (args: { month?: string; startDate?: string; endDate?: string }) => {
+  if (args.month) {
+    const [y, m] = args.month.split("-").map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return { startDate: `${args.month}-01`, endDate: `${args.month}-${String(last).padStart(2, "0")}` };
+  }
+  if (args.startDate || args.endDate) {
+    return { startDate: args.startDate ?? "2000-01-01", endDate: args.endDate ?? "2999-12-31" };
+  }
+  return {};
+};
+
+const expenseScope = (actor: JwtPayload, mine?: boolean) =>
+  ADMINS.includes(actor.role) && !mine ? "all expenses of the company" : "only expenses recorded by this user";
 const accountsArgs = z.object({
   search: z.string().trim().max(100).optional(),
   allAccounts: z.boolean().optional(),
@@ -445,7 +521,653 @@ const projectPaymentsArgs = z.object({
   limit: limitArg,
 });
 
+// ---------- write tools: leads ----------
+// Writes go through the same service functions as the REST routes, with the logged-in user as the
+// actor, so createdBy / updatedBy are always the user who is chatting with the assistant.
+// assignedTo and customFields are deliberately not exposed to the model.
+
+const LEAD_WRITE_ROLES = SALES_ROLES;
+
+const leadFieldsSchema = createLeadValidationSchema.omit({ assignedTo: true, customFields: true });
+const createLeadArgs = leadFieldsSchema;
+const updateLeadArgs = leadFieldsSchema
+  .partial()
+  .extend({ leadId: objectId, status: z.enum(Object.values(LeadStatus) as [LeadStatus, ...LeadStatus[]]).optional() })
+  .strict();
+
+const leadFieldProperties = {
+  firstName: { type: "string", description: "2-50 chars" },
+  lastName: { type: "string", description: "2-50 chars" },
+  phone: { type: "string", description: "Primary phone number (must be unique)" },
+  source: { type: "string", enum: Object.values(LeadSource) },
+  email: { type: "string" },
+  alternatePhone: { type: "string" },
+  company: { type: "string" },
+  website: { type: "string" },
+  industry: { type: "string" },
+  jobTitle: { type: "string" },
+  employeeSize: { type: "string" },
+  country: { type: "string" },
+  state: { type: "string" },
+  city: { type: "string" },
+  zipCode: { type: "string" },
+  address: { type: "string" },
+  location: { type: "string" },
+  leadType: { type: "string", enum: Object.values(LeadType) },
+  priority: { type: "string", enum: Object.values(LeadPriority) },
+  pipelineStage: { type: "string" },
+  estimatedValue: { type: "number", minimum: 0 },
+  expectedCloseDate: { type: "string", description: "YYYY-MM-DD" },
+  preferredContactMethod: { type: "string", enum: Object.values(PreferredContactMethod) },
+  tags: { type: "array", items: { type: "string" } },
+  labels: { type: "array", items: { type: "string" } },
+  requirementTitle: { type: "string" },
+  requirementDescription: { type: "string", description: "Max 2000 chars" },
+  budget: { type: "number", minimum: 0 },
+  timeline: { type: "string" },
+  technologies: { type: "array", items: { type: "string" } },
+  services: { type: "array", items: { type: "string" } },
+};
+
+const AI_WRITE_TOOLS: AiTool[] = [
+  {
+    name: "create_lead",
+    description:
+      "Create a new sales lead. Required: firstName, lastName, phone, source. Everything else is optional. " +
+      "Only call it when the user clearly asked to create a lead and gave the required values; never invent " +
+      "values. The lead is recorded as created by the logged-in user. Returns the created lead.",
+    parameters: {
+      type: "object",
+      properties: leadFieldProperties,
+      required: ["firstName", "lastName", "phone", "source"],
+    },
+    allowedRoles: LEAD_WRITE_ROLES,
+    run: async (raw, actor) => {
+      const args = createLeadArgs.parse(raw ?? {});
+      const res = await LeadServices.createLead(args as never, actor);
+      return { created: true, lead: compactLead(res.data) };
+    },
+  },
+  {
+    name: "update_lead",
+    description:
+      "Update an existing lead by leadId (get it from search_leads first; if several leads match, ask the " +
+      "user which one). Send ONLY the fields the user wants to change. 'status' changes the lead status. " +
+      "Returns the updated lead.",
+    parameters: {
+      type: "object",
+      properties: {
+        leadId: { type: "string", description: "24-char lead id" },
+        status: { type: "string", enum: Object.values(LeadStatus) },
+        ...leadFieldProperties,
+      },
+      required: ["leadId"],
+    },
+    allowedRoles: LEAD_WRITE_ROLES,
+    run: async (raw, actor) => {
+      const { leadId, status, ...fields } = updateLeadArgs.parse(raw ?? {});
+      if (!status && Object.keys(fields).length === 0) {
+        throw new Error("Nothing to update: tell me which fields to change.");
+      }
+      let lead: unknown;
+      if (Object.keys(fields).length) {
+        lead = (await LeadServices.updateLead(leadId, fields as never, actor)).data;
+      }
+      if (status) {
+        lead = (await LeadServices.updateLeadStatus(leadId, status, actor)).data;
+      }
+      return { updated: true, lead: compactLead(lead) };
+    },
+  },
+];
+
+// ---------- write tools: clients ----------
+// accountManager, leadId, clientCode, creditedTo, customFields and dates other than nextFollowUp are
+// not exposed. creditedTo is set by the service to the logged-in user on create.
+
+const clientFieldsSchema = createClientValidationSchema
+  .omit({ leadId: true, accountManager: true, customFields: true, clientCode: true, joinedAt: true, lastContactAt: true })
+  .extend({ nextFollowUp: dateStr.optional() })
+  .strict();
+const updateClientArgs = clientFieldsSchema.partial().extend({ clientId: objectId }).strict();
+
+const clientFieldProperties = {
+  clientType: { type: "string", enum: Object.values(ClientType) },
+  firstName: { type: "string" },
+  lastName: { type: "string" },
+  fullName: { type: "string" },
+  email: { type: "string" },
+  phone: { type: "string" },
+  alternatePhone: { type: "string" },
+  companyName: { type: "string" },
+  companyWebsite: { type: "string", description: "Full URL incl. https://" },
+  industry: { type: "string" },
+  companySize: { type: "string" },
+  taxId: { type: "string" },
+  status: { type: "string", enum: Object.values(ClientStatus) },
+  country: { type: "string" },
+  state: { type: "string" },
+  city: { type: "string" },
+  zipCode: { type: "string" },
+  address: { type: "string" },
+  preferredContactMethod: { type: "string" },
+  estimatedValue: { type: "number", minimum: 0 },
+  budget: { type: "number", minimum: 0 },
+  timeline: { type: "string" },
+  requirementTitle: { type: "string" },
+  requirementDescription: { type: "string" },
+  technologies: { type: "array", items: { type: "string" } },
+  services: { type: "array", items: { type: "string" } },
+  nextFollowUp: { type: "string", description: "YYYY-MM-DD" },
+  tags: { type: "array", items: { type: "string" } },
+  labels: { type: "array", items: { type: "string" } },
+};
+
+const hasClientName = (a: { firstName?: string; fullName?: string; companyName?: string }) =>
+  Boolean(a.firstName || a.fullName || a.companyName);
+
+// ---------- write tools: projects ----------
+// Payments, payment schedule, documents and priority are not exposed (money movement and ordering
+// stay in the UI). Managers cannot set money fields: the service strips them.
+
+const projectFieldsSchema = createProjectValidationSchema
+  .omit({ payments: true, paymentSchedule: true, documents: true, paymentStatus: true, nextPaymentDate: true, priority: true })
+  .extend({
+    client: objectId,
+    projectManager: objectId,
+    developers: z.array(objectId).optional(),
+    startDate: dateStr,
+    endDate: dateStr.optional(),
+  })
+  .strict();
+const updateProjectArgs = projectFieldsSchema.partial().extend({ projectId: objectId }).strict();
+
+const projectFieldProperties = {
+  name: { type: "string" },
+  description: { type: "string" },
+  type: { type: "string", enum: Object.values(ProjectType) },
+  client: { type: "string", description: "24-char client id (from search_clients)" },
+  projectManager: { type: "string", description: "24-char user id (from find_staff)" },
+  developers: { type: "array", items: { type: "string" }, description: "24-char user ids" },
+  budget: { type: "number", minimum: 0, description: "Admins only; ignored for managers" },
+  startDate: { type: "string", description: "YYYY-MM-DD" },
+  endDate: { type: "string", description: "YYYY-MM-DD" },
+  technologies: { type: "array", items: { type: "string" }, description: "At least one" },
+  status: { type: "string", enum: Object.values(ProjectStatus) },
+  liveUrl: { type: "string" },
+  developmentLiveUrl: { type: "string" },
+  repositoryUrl: { type: "string" },
+};
+
+// ---------- write tools: expenses ----------
+// Goes through ExpenseService, so the ledger (applyAccountChange) and account-ownership checks apply.
+
+const expenseFields = {
+  amount: z.number().positive(),
+  categoryId: objectId,
+  financialAccountId: objectId,
+  expenseDate: dateStr.transform((s) => new Date(s)),
+  description: z.string().trim().max(500).optional(),
+  reference: z.string().trim().max(100).optional(),
+};
+const createExpenseArgs = z.object(expenseFields).strict();
+const updateExpenseArgs = z.object(expenseFields).partial().extend({ expenseId: objectId }).strict();
+
+const expenseFieldProperties = {
+  amount: { type: "number", minimum: 0, description: "Positive amount" },
+  categoryId: { type: "string", description: "24-char category id (from expense_categories)" },
+  financialAccountId: { type: "string", description: "24-char account id (from financial_accounts)" },
+  expenseDate: { type: "string", description: "YYYY-MM-DD" },
+  description: { type: "string", description: "Max 500 chars" },
+  reference: { type: "string", description: "Max 100 chars" },
+};
+
+AI_WRITE_TOOLS.push(
+  {
+    name: "create_client",
+    description:
+      "Create a new client. Needs a name (firstName, fullName or companyName) and should have a phone or " +
+      "email. Everything else is optional. Only call it when the user clearly asked to create a client and " +
+      "gave the values; never invent values. The client is credited to the logged-in user automatically.",
+    parameters: { type: "object", properties: clientFieldProperties },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const args = clientFieldsSchema.parse(raw ?? {});
+      if (!hasClientName(args)) throw new Error("A client needs a name: firstName, fullName or companyName.");
+      if (!args.phone && !args.email) throw new Error("A client needs a phone or an email.");
+      const res = await ClientServices.createClient(args as never, actor);
+      return { created: true, client: compactClient(res.data, actor.role) };
+    },
+  },
+  {
+    name: "update_client",
+    description:
+      "Update an existing client by clientId (from search_clients; if several match, ask which one). Send " +
+      "ONLY the fields to change; 'status' changes the client status.",
+    parameters: {
+      type: "object",
+      properties: { clientId: { type: "string", description: "24-char client id" }, ...clientFieldProperties },
+      required: ["clientId"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { clientId, ...fields } = updateClientArgs.parse(raw ?? {});
+      if (Object.keys(fields).length === 0) throw new Error("Nothing to update: tell me which fields to change.");
+      const res = await ClientServices.updateClient(clientId, fields as never, actor);
+      return { updated: true, client: compactClient(res.data, actor.role) };
+    },
+  },
+  {
+    name: "create_project",
+    description:
+      "Create a new project. Required: name, type, client (id), projectManager (user id), startDate, " +
+      "technologies (at least one). Optional: description, developers, endDate, status, budget (admins " +
+      "only), URLs. Resolve client with search_clients and people with find_staff; if a name matches " +
+      "several records ask the user which one. Never invent values.",
+    parameters: {
+      type: "object",
+      properties: projectFieldProperties,
+      required: ["name", "type", "client", "projectManager", "startDate", "technologies"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const args = projectFieldsSchema.parse(raw ?? {});
+      const res = await ProjectServices.createProject(args as never, actor);
+      return { created: true, project: compactProject((res as Json).data, actor.role) };
+    },
+  },
+  {
+    name: "update_project",
+    description:
+      "Update an existing project by projectId (from find_projects; if several match, ask which one). Send " +
+      "ONLY the fields to change; 'status' changes the project status. Payments cannot be changed here.",
+    parameters: {
+      type: "object",
+      properties: { projectId: { type: "string", description: "24-char project id" }, ...projectFieldProperties },
+      required: ["projectId"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { projectId, ...fields } = updateProjectArgs.parse(raw ?? {});
+      if (Object.keys(fields).length === 0) throw new Error("Nothing to update: tell me which fields to change.");
+      const res = await ProjectServices.updateProject(projectId, fields as never, actor);
+      return { updated: true, project: compactProject((res as Json).data, actor.role) };
+    },
+  },
+  {
+    name: "expense_categories",
+    description:
+      "List expense categories (id and name). Use it to turn a category name the user gives into a categoryId " +
+      "before create_expense / update_expense.",
+    parameters: {
+      type: "object",
+      properties: { search: { type: "string" }, limit: limitSchema },
+    },
+    allowedRoles: ALL_ROLES,
+    run: async (raw) => {
+      const args = searchArgs.parse(raw ?? {});
+      const query: Record<string, unknown> = { limit: String(clampLimit(args.limit, 50)) };
+      if (args.search) query.searchTerm = args.search;
+      const res = await ExpenseCategoryService.getAllExpenseCategories(query);
+      return {
+        categories: resultList(res).map((c) => ({ id: String(toPlain(c)._id ?? ""), name: toPlain(c).name })),
+      };
+    },
+  },
+  {
+    name: "create_expense",
+    description:
+      "Record a new expense. Required: amount, categoryId, financialAccountId, expenseDate (YYYY-MM-DD). " +
+      "Optional: description, reference. It DEDUCTS the amount from the chosen account's balance. Resolve " +
+      "the category with expense_categories and the account with financial_accounts; ask if a name matches " +
+      "several. If the user gives no date, ask for it. Recorded as created by the logged-in user.",
+    parameters: {
+      type: "object",
+      properties: expenseFieldProperties,
+      required: ["amount", "categoryId", "financialAccountId", "expenseDate"],
+    },
+    allowedRoles: ALL_ROLES,
+    run: async (raw, actor) => {
+      const args = createExpenseArgs.parse(raw ?? {});
+      const expense = await ExpenseService.createExpense(args as never, actor as FinanceActor);
+      return { created: true, expense: compactExpense(expense) };
+    },
+  },
+  {
+    name: "update_expense",
+    description:
+      "Update an existing expense by expenseId (from the expenses tool; if several match, ask which one). " +
+      "Send ONLY the fields to change. Changing amount or account adjusts the account balances. Users can " +
+      "only edit expenses they recorded; admins can edit any.",
+    parameters: {
+      type: "object",
+      properties: { expenseId: { type: "string", description: "24-char expense id" }, ...expenseFieldProperties },
+      required: ["expenseId"],
+    },
+    allowedRoles: ALL_ROLES,
+    run: async (raw, actor) => {
+      const { expenseId, ...fields } = updateExpenseArgs.parse(raw ?? {});
+      if (Object.keys(fields).length === 0) throw new Error("Nothing to update: tell me which fields to change.");
+      const expense = await ExpenseService.updateExpense(expenseId, fields as never, actor as FinanceActor);
+      return { updated: true, expense: compactExpense(expense) };
+    },
+  },
+);
+
+// ---------- write tools: attendance ----------
+// check-in/out and breaks always act on the logged-in user with the server's current time.
+// Manual create/edit is for admins and managers only (same as the REST routes).
+
+const attendanceActor = (actor: JwtPayload) => ({ userId: String(actor.userId), role: String(actor.role) });
+
+/** Times are given in Bangladesh time (UTC+6) and stored as real instants. */
+const bdDateTime = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}[T ]([01]\d|2[0-3]):[0-5]\d$/, "use YYYY-MM-DD HH:mm (Bangladesh time)")
+  .transform((s) => new Date(`${s.replace(" ", "T")}:00+06:00`));
+
+const createAttendanceArgs = z
+  .object({
+    userId: objectId,
+    date: dateStr,
+    checkIn: bdDateTime,
+    checkOut: bdDateTime.optional(),
+    editReason: z.string().trim().min(3).max(500),
+  })
+  .strict();
+const updateAttendanceArgs = z
+  .object({
+    attendanceId: objectId,
+    checkIn: bdDateTime.optional(),
+    checkOut: bdDateTime.nullable().optional(),
+    editReason: z.string().trim().min(3).max(500),
+  })
+  .strict();
+
+const noArgs = { type: "object", properties: {} } as const;
+
+// ---------- write tools: leave ----------
+
+const leaveFields = {
+  leaveType: z.nativeEnum(LeaveType),
+  startDate: dateStr,
+  endDate: dateStr.optional(),
+  halfDaySession: z.nativeEnum(HalfDaySession).optional(),
+  leaveTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "use HH:mm").optional(),
+  expectedArrivalTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "use HH:mm").optional(),
+  reason: z.string().trim().min(3).max(1000),
+  emergencyContact: z.string().trim().max(100).optional(),
+};
+const createLeaveArgs = z.object(leaveFields).strict();
+const createLeaveForStaffArgs = z
+  .object({
+    ...leaveFields,
+    staffId: objectId,
+    autoApprove: z.boolean().default(true),
+    extraLeaveType: z.nativeEnum(ExtraLeaveType).optional(),
+    extraApprovalNote: z.string().trim().min(3).max(500).optional(),
+  })
+  .strict();
+const updateLeaveArgs = z
+  .object(leaveFields)
+  .partial()
+  .extend({
+    leaveRequestId: objectId,
+    extraLeaveType: z.nativeEnum(ExtraLeaveType).optional(),
+    extraApprovalNote: z.string().trim().min(3).max(500).optional(),
+    note: z.string().trim().max(500).optional(),
+  })
+  .strict();
+const leaveIdArgs = z.object({ leaveRequestId: objectId }).strict();
+const approveLeaveArgs = leaveIdArgs
+  .extend({
+    note: z.string().trim().max(500).optional(),
+    extraLeaveType: z.nativeEnum(ExtraLeaveType).optional(),
+    extraApprovalNote: z.string().trim().min(3).max(500).optional(),
+  })
+  .strict();
+const rejectLeaveArgs = leaveIdArgs
+  .extend({ reason: z.string().trim().min(3).max(500), note: z.string().trim().max(500).optional() })
+  .strict();
+
+const leaveFieldProperties = {
+  leaveType: { type: "string", enum: Object.values(LeaveType) },
+  startDate: { type: "string", description: "YYYY-MM-DD" },
+  endDate: { type: "string", description: "YYYY-MM-DD; omit for a single day" },
+  halfDaySession: { type: "string", enum: Object.values(HalfDaySession), description: "For half_day only" },
+  leaveTime: { type: "string", description: "HH:mm, for early_leave" },
+  expectedArrivalTime: { type: "string", description: "HH:mm, for late_arrival" },
+  reason: { type: "string", description: "3-1000 chars" },
+  emergencyContact: { type: "string" },
+};
+const extraLeaveProperties = {
+  extraLeaveType: {
+    type: "string",
+    enum: Object.values(ExtraLeaveType),
+    description: "Needed when the request goes over the leave balance",
+  },
+  extraApprovalNote: { type: "string", description: "Comment, min 3 chars, needed with extraLeaveType" },
+};
+
+const compactAttendanceResult = (record: unknown) => compactAttendanceDay(record);
+
+AI_WRITE_TOOLS.push(
+  {
+    name: "check_in",
+    description:
+      "Check the logged-in user in for today at the current time. Only when the user asks to check in " +
+      "(e.g. 'check in', 'attendance dao').",
+    parameters: noArgs,
+    allowedRoles: ALL_ROLES,
+    run: async (_raw, actor) => ({
+      done: true,
+      attendance: compactAttendanceResult(await AttendanceService.checkIn(attendanceActor(actor))),
+    }),
+  },
+  {
+    name: "check_out",
+    description: "Check the logged-in user out for today at the current time. Only when the user asks to.",
+    parameters: noArgs,
+    allowedRoles: ALL_ROLES,
+    run: async (_raw, actor) => ({
+      done: true,
+      attendance: compactAttendanceResult(await AttendanceService.checkOut(attendanceActor(actor))),
+    }),
+  },
+  {
+    name: "start_break",
+    description: "Start a break for the logged-in user now. Only when the user asks to.",
+    parameters: noArgs,
+    allowedRoles: ALL_ROLES,
+    run: async (_raw, actor) => ({
+      done: true,
+      attendance: compactAttendanceResult(await AttendanceService.startBreak(attendanceActor(actor))),
+    }),
+  },
+  {
+    name: "end_break",
+    description: "End the logged-in user's running break now. Only when the user asks to.",
+    parameters: noArgs,
+    allowedRoles: ALL_ROLES,
+    run: async (_raw, actor) => ({
+      done: true,
+      attendance: compactAttendanceResult(await AttendanceService.endBreak(attendanceActor(actor))),
+    }),
+  },
+  {
+    name: "create_attendance_record",
+    description:
+      "Manually add a missing attendance day for a team member. Required: userId (from find_staff), date " +
+      "(YYYY-MM-DD), checkIn (YYYY-MM-DD HH:mm, Bangladesh time) and editReason. Optional checkOut in the " +
+      "same format. Never invent times.",
+    parameters: {
+      type: "object",
+      properties: {
+        userId: { type: "string", description: "24-char user id" },
+        date: { type: "string", description: "YYYY-MM-DD" },
+        checkIn: { type: "string", description: "YYYY-MM-DD HH:mm, Bangladesh time" },
+        checkOut: { type: "string", description: "YYYY-MM-DD HH:mm, Bangladesh time" },
+        editReason: { type: "string", description: "Why it is added manually, min 3 chars" },
+      },
+      required: ["userId", "date", "checkIn", "editReason"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const args = createAttendanceArgs.parse(raw ?? {});
+      const res = await AttendanceService.create(args as never, attendanceActor(actor));
+      return { created: true, attendance: compactAttendanceResult(res) };
+    },
+  },
+  {
+    name: "update_attendance_record",
+    description:
+      "Correct an existing attendance record by attendanceId (the 'id' from attendance_records). Send only " +
+      "the times to change (YYYY-MM-DD HH:mm, Bangladesh time) and a " +
+      "required editReason.",
+    parameters: {
+      type: "object",
+      properties: {
+        attendanceId: { type: "string", description: "24-char attendance record id" },
+        checkIn: { type: "string", description: "YYYY-MM-DD HH:mm, Bangladesh time" },
+        checkOut: { type: "string", description: "YYYY-MM-DD HH:mm, Bangladesh time" },
+        editReason: { type: "string", description: "Why it is changed, min 3 chars" },
+      },
+      required: ["attendanceId", "editReason"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { attendanceId, ...fields } = updateAttendanceArgs.parse(raw ?? {});
+      if (fields.checkIn === undefined && fields.checkOut === undefined) {
+        throw new Error("Nothing to update: give a new checkIn and/or checkOut.");
+      }
+      const res = await AttendanceService.update(attendanceId, fields as never, attendanceActor(actor));
+      return { updated: true, attendance: compactAttendanceResult(res) };
+    },
+  },
+  {
+    name: "create_leave_request",
+    description:
+      "Submit a leave request for the logged-in user. Required: leaveType, startDate, reason. Optional: " +
+      "endDate, halfDaySession (half_day), leaveTime (early_leave), expectedArrivalTime (late_arrival), " +
+      "emergencyContact. It is created as pending for approval. Never invent dates or reasons.",
+    parameters: { type: "object", properties: leaveFieldProperties, required: ["leaveType", "startDate", "reason"] },
+    allowedRoles: ALL_ROLES,
+    run: async (raw, actor) => {
+      const args = createLeaveArgs.parse(raw ?? {});
+      const res = await LeaveService.createRequest(attendanceActor(actor) as never, args as never);
+      return { created: true, leave: compactLeave(res) };
+    },
+  },
+  {
+    name: "create_leave_for_staff",
+    description:
+      "Admins only: add a leave for a team member (staffId from find_staff). Same fields as " +
+      "create_leave_request. autoApprove defaults to true. If it goes over the person's balance, " +
+      "extraLeaveType and extraApprovalNote are required.",
+    parameters: {
+      type: "object",
+      properties: {
+        staffId: { type: "string", description: "24-char user id" },
+        autoApprove: { type: "boolean", description: "Default true" },
+        ...leaveFieldProperties,
+        ...extraLeaveProperties,
+      },
+      required: ["staffId", "leaveType", "startDate", "reason"],
+    },
+    allowedRoles: ADMINS,
+    run: async (raw, actor) => {
+      const args = createLeaveForStaffArgs.parse(raw ?? {});
+      const res = await LeaveService.createForStaff(attendanceActor(actor) as never, args as never);
+      return { created: true, leave: compactLeave(res) };
+    },
+  },
+  {
+    name: "update_leave_request",
+    description:
+      "Edit an existing leave request by leaveRequestId (from leave_requests). Send only the fields to " +
+      "change. Admins and managers only. If an edit makes an approved request go over balance, an admin " +
+      "must also give extraLeaveType and extraApprovalNote.",
+    parameters: {
+      type: "object",
+      properties: {
+        leaveRequestId: { type: "string", description: "24-char leave request id" },
+        note: { type: "string" },
+        ...leaveFieldProperties,
+        ...extraLeaveProperties,
+      },
+      required: ["leaveRequestId"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { leaveRequestId, ...fields } = updateLeaveArgs.parse(raw ?? {});
+      if (Object.keys(fields).length === 0) throw new Error("Nothing to update: tell me which fields to change.");
+      const res = await LeaveService.updateRequest(leaveRequestId, attendanceActor(actor) as never, fields as never);
+      return { updated: true, leave: compactLeave(res) };
+    },
+  },
+  {
+    name: "cancel_leave_request",
+    description:
+      "Cancel the logged-in user's OWN pending leave request by leaveRequestId (from leave_requests).",
+    parameters: {
+      type: "object",
+      properties: { leaveRequestId: { type: "string", description: "24-char leave request id" } },
+      required: ["leaveRequestId"],
+    },
+    allowedRoles: ALL_ROLES,
+    run: async (raw, actor) => {
+      const { leaveRequestId } = leaveIdArgs.parse(raw ?? {});
+      const res = await LeaveService.cancelRequest(leaveRequestId, attendanceActor(actor) as never);
+      return { cancelled: true, leave: compactLeave(res) };
+    },
+  },
+  {
+    name: "approve_leave_request",
+    description:
+      "Approve a pending leave request by leaveRequestId. Admins and managers only (the service checks who " +
+      "may decide on whom). If it is over balance, extraLeaveType and extraApprovalNote are required. Only " +
+      "when the user explicitly asks to approve.",
+    parameters: {
+      type: "object",
+      properties: {
+        leaveRequestId: { type: "string", description: "24-char leave request id" },
+        note: { type: "string" },
+        ...extraLeaveProperties,
+      },
+      required: ["leaveRequestId"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { leaveRequestId, ...options } = approveLeaveArgs.parse(raw ?? {});
+      const res = await LeaveService.approveRequest(leaveRequestId, attendanceActor(actor) as never, options as never);
+      return { approved: true, leave: compactLeave(res) };
+    },
+  },
+  {
+    name: "reject_leave_request",
+    description:
+      "Reject a pending leave request by leaveRequestId with a required reason. Admins and managers only. " +
+      "Only when the user explicitly asks to reject, and give the reason they stated.",
+    parameters: {
+      type: "object",
+      properties: {
+        leaveRequestId: { type: "string", description: "24-char leave request id" },
+        reason: { type: "string", description: "Rejection reason, min 3 chars" },
+        note: { type: "string" },
+      },
+      required: ["leaveRequestId", "reason"],
+    },
+    allowedRoles: ADMINS_AND_MANAGER,
+    run: async (raw, actor) => {
+      const { leaveRequestId, ...payload } = rejectLeaveArgs.parse(raw ?? {});
+      const res = await LeaveService.rejectRequest(leaveRequestId, attendanceActor(actor) as never, payload);
+      return { rejected: true, leave: compactLeave(res) };
+    },
+  },
+);
+
 const AI_TOOLS: AiTool[] = [
+  ...AI_WRITE_TOOLS,
   {
     name: "find_projects",
     description:
@@ -606,8 +1328,19 @@ const AI_TOOLS: AiTool[] = [
     allowedRoles: SALES_ROLES,
     run: async (raw, actor) => {
       const args = searchArgs.parse(raw ?? {});
+      const words = searchWords(args.search);
+      if (words.length > 1) {
+        const clients = await searchAllWords(
+          words,
+          async (term) =>
+            (await ClientServices.getClients({ limit: MULTI_WORD_FETCH_LIMIT, searchTerm: term }, actor))
+              .data as unknown[],
+          (c) => compactClient(sanitizeClientsForRole([c], actor.role)[0], actor.role),
+        );
+        return { clients: clients.slice(0, clampLimit(args.limit)), total: clients.length };
+      }
       const query: Record<string, string> = { limit: String(clampLimit(args.limit)) };
-      if (args.search) query.searchTerm = args.search;
+      if (words[0]) query.searchTerm = escapeRegex(words[0]);
       const res = await ClientServices.getClients(query, actor);
       return {
         clients: sanitizeClientsForRole(res.data as unknown[], actor.role).map((c) =>
@@ -631,8 +1364,21 @@ const AI_TOOLS: AiTool[] = [
     allowedRoles: SALES_ROLES,
     run: async (raw) => {
       const args = searchLeadsArgs.parse(raw ?? {});
+      const words = searchWords(args.search);
+      if (words.length > 1) {
+        const leads = await searchAllWords(
+          words,
+          async (term) => {
+            const q: Record<string, string> = { limit: MULTI_WORD_FETCH_LIMIT, searchTerm: term };
+            if (args.status) q.status = args.status;
+            return ((await LeadServices.getLeads(q)) as unknown as { data?: unknown[] }).data ?? [];
+          },
+          compactLead,
+        );
+        return { leads: leads.slice(0, clampLimit(args.limit)), total: leads.length };
+      }
       const query: Record<string, string> = { limit: String(clampLimit(args.limit)) };
-      if (args.search) query.searchTerm = args.search;
+      if (words[0]) query.searchTerm = escapeRegex(words[0]);
       if (args.status) query.status = args.status;
       const res = (await LeadServices.getLeads(query)) as unknown as {
         data?: unknown[];
@@ -664,7 +1410,7 @@ const AI_TOOLS: AiTool[] = [
     allowedRoles: SALES_ROLES,
     run: async (raw) => {
       const args = followUpCalendarArgs.parse(raw ?? {});
-      const todayBd = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const todayBd = day(new Date()) as string;
       const from = args.from ?? todayBd;
       const res = await LeadServices.getFollowUpCalendar();
       const days = res.data.filter((d) => d.date >= from && (!args.to || d.date <= args.to));
@@ -693,7 +1439,17 @@ const AI_TOOLS: AiTool[] = [
           }),
         });
       }
-      return { today: todayBd, from, to: args.to, totalDays: days.length, totalLeads, calendar };
+      const shown = calendar.reduce((n, c) => n + (c.leads as unknown[]).length, 0);
+      return {
+        today: todayBd,
+        from,
+        to: args.to,
+        totalDays: days.length,
+        totalLeads,
+        shownLeads: shown,
+        ...(shown < totalLeads ? { note: "List is capped; more leads exist. Tell the user the real total." } : {}),
+        calendar,
+      };
     },
   },
   {
@@ -737,8 +1493,21 @@ const AI_TOOLS: AiTool[] = [
     allowedRoles: ADMINS_AND_MANAGER,
     run: async (raw) => {
       const args = staffArgs.parse(raw ?? {});
+      const words = searchWords(args.search);
+      if (words.length > 1) {
+        const staff = await searchAllWords(
+          words,
+          async (term) => {
+            const q: Record<string, string> = { limit: MULTI_WORD_FETCH_LIMIT, searchTerm: term };
+            if (args.role) q.role = args.role;
+            return resultList(await UserServices.getUsers(q));
+          },
+          compactStaff,
+        );
+        return { staff: staff.slice(0, clampLimit(args.limit)), total: staff.length };
+      }
       const query: Record<string, string> = { limit: String(clampLimit(args.limit)) };
-      if (args.search) query.searchTerm = args.search;
+      if (words[0]) query.searchTerm = escapeRegex(words[0]);
       if (args.role) query.role = args.role;
       const res = await UserServices.getUsers(query);
       return {
@@ -921,14 +1690,17 @@ const AI_TOOLS: AiTool[] = [
   {
     name: "leave_requests",
     description:
-      "Leave requests. Normal staff get only their own; admins and managers get everyone's (optionally " +
-      "for one staffId). Filter by status, from/to dates (YYYY-MM-DD).",
+      "Leave requests (each has submittedAt = the day it was applied). Normal staff get only their own; " +
+      "admins and managers get everyone's (optionally for one staffId). Newest submitted first. Filter by " +
+      "status and by from/to (YYYY-MM-DD), which select requests whose LEAVE dates overlap that range, " +
+      "NOT the day they were submitted. For 'applications that came / are waiting' use status=pending " +
+      "without dates and look at submittedAt.",
     parameters: {
       type: "object",
       properties: {
-        status: { type: "string", description: "e.g. PENDING, APPROVED, REJECTED, CANCELLED" },
-        from: { type: "string", description: "YYYY-MM-DD" },
-        to: { type: "string", description: "YYYY-MM-DD" },
+        status: { type: "string", enum: Object.values(LeaveStatus) },
+        from: { type: "string", description: "YYYY-MM-DD, leave end date on/after this" },
+        to: { type: "string", description: "YYYY-MM-DD, leave start date on/before this" },
         staffId: { type: "string", description: "24-char user id (admins/managers only)" },
         limit: limitSchema,
       },
@@ -977,13 +1749,16 @@ const AI_TOOLS: AiTool[] = [
   {
     name: "expenses",
     description:
-      "Expenses (date, amount, category, account, description), newest first, with their total. " +
+      "Individual expense records (date, amount, category, account, description), newest first. Capped " +
+      "at a few records, so NEVER add these up to get a total: 'total' is the NUMBER of matching records, " +
+      "not money. For any total/sum of money use expense_summary. " +
       "Admins see everyone's expenses (set mine=true for only their own); other roles see only expenses they recorded. " +
-      "Filter by startDate/endDate (YYYY-MM-DD) or a keyword.",
+      "Filter by month (YYYY-MM), startDate/endDate (YYYY-MM-DD) or a keyword.",
     parameters: {
       type: "object",
       properties: {
         search: { type: "string" },
+        month: { type: "string", description: "YYYY-MM, the whole calendar month" },
         startDate: { type: "string", description: "YYYY-MM-DD" },
         endDate: { type: "string", description: "YYYY-MM-DD" },
         mine: { type: "boolean" },
@@ -998,21 +1773,28 @@ const AI_TOOLS: AiTool[] = [
         sort: "-expenseDate",
       };
       if (args.search) query.searchTerm = args.search;
-      if (args.startDate) query.startDate = args.startDate;
-      if (args.endDate) query.endDate = args.endDate;
+      Object.assign(query, expensePeriod(args));
       if (args.mine) query.mine = "true";
       const res = await ExpenseService.getAllExpenses(query, actor as FinanceActor);
-      return { expenses: resultList(res).map(compactExpense), total: res.meta?.total };
+      return {
+        scope: expenseScope(actor, args.mine),
+        period: expensePeriod(args),
+        expenses: resultList(res).map(compactExpense),
+        matchingRecordCount: res.meta?.total,
+      };
     },
   },
   {
     name: "expense_summary",
     description:
-      "Expense totals (overall, this month, by category) for the same expenses the 'expenses' tool can see. " +
-      "Optional startDate/endDate (YYYY-MM-DD); mine=true for only the user's own.",
+      "Money totals of expenses: totalAmount, count, average, largest and top categories for the chosen " +
+      "period. THE tool for 'how much was spent' questions. For 'this month' / 'a given month' pass " +
+      "month=YYYY-MM (today's month is in the system prompt) and read totalAmount. With no period it is " +
+      "all-time. Same visibility as the 'expenses' tool; mine=true for only the user's own.",
     parameters: {
       type: "object",
       properties: {
+        month: { type: "string", description: "YYYY-MM, the whole calendar month" },
         startDate: { type: "string", description: "YYYY-MM-DD" },
         endDate: { type: "string", description: "YYYY-MM-DD" },
         mine: { type: "boolean" },
@@ -1022,10 +1804,18 @@ const AI_TOOLS: AiTool[] = [
     run: async (raw, actor) => {
       const args = expenseArgs.omit({ search: true, limit: true }).parse(raw ?? {});
       const query: Record<string, unknown> = {};
-      if (args.startDate) query.startDate = args.startDate;
-      if (args.endDate) query.endDate = args.endDate;
+      Object.assign(query, expensePeriod(args));
       if (args.mine) query.mine = "true";
-      return ExpenseService.getExpenseSummary(query, actor as FinanceActor);
+      const { thisMonthAmount: _m, thisMonthCount: _c, ...summary } = await ExpenseService.getExpenseSummary(
+        query,
+        actor as FinanceActor,
+      );
+      // thisMonthAmount is dropped on purpose: next to totalAmount it made the model pick the wrong number.
+      return {
+        scope: expenseScope(actor, args.mine),
+        period: expensePeriod(args).startDate ? expensePeriod(args) : "all time",
+        ...summary,
+      };
     },
   },
 

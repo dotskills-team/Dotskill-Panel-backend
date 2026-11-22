@@ -134,7 +134,8 @@ export class GeminiProvider implements AiProvider {
       {
         model: modelName,
         systemInstruction: system,
-        generationConfig: { maxOutputTokens: AI_MAX_OUTPUT_TOKENS },
+        // Low temperature: this assistant reports business data, so it must not get "creative".
+        generationConfig: { maxOutputTokens: AI_MAX_OUTPUT_TOKENS, temperature: 0.1 },
         ...(tools.length ? { tools: [{ functionDeclarations: toGeminiTools(tools) }] } : {}),
       },
       { timeout: REQUEST_TIMEOUT_MS },

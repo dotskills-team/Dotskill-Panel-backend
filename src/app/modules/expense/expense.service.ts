@@ -332,6 +332,20 @@ const getExpenseSummary = async (query: Record<string, unknown>, actor: FinanceA
   );
   if (dateFilter) match.expenseDate = dateFilter;
 
+  // Same category / account / search filters as the list, so the cards always match the table.
+  const isObjectId = (v: unknown): v is string =>
+    typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
+  if (isObjectId(query.categoryId)) match.categoryId = new mongoose.Types.ObjectId(query.categoryId);
+  if (isObjectId(query.financialAccountId)) {
+    match.financialAccountId = new mongoose.Types.ObjectId(query.financialAccountId);
+  }
+  if (typeof query.searchTerm === "string" && query.searchTerm.trim()) {
+    const pattern = query.searchTerm.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    match.$or = EXPENSE_SEARCHABLE_FIELDS.map((field) => ({
+      [field]: { $regex: pattern, $options: "i" },
+    }));
+  }
+
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
